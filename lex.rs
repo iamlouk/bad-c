@@ -129,26 +129,10 @@ impl Display for Tok {
             SkipMe => return write!(f, "<SKIP-ME>"),
             Id(id) => return write!(f, "{}", &**id),
             String(str) => return write!(f, "{:?}", &**str),
-            IntLit {
-                signed: true,
-                bits: 32,
-                val,
-            } => return write!(f, "{}", val),
-            IntLit {
-                signed: true,
-                bits: 64,
-                val,
-            } => return write!(f, "{}l", val),
-            IntLit {
-                signed: false,
-                bits: 32,
-                val,
-            } => return write!(f, "{}u", val),
-            IntLit {
-                signed: false,
-                bits: 64,
-                val,
-            } => return write!(f, "{}ul", val),
+            IntLit { signed: true, bits: 32, val } => return write!(f, "{}", val),
+            IntLit { signed: true, bits: 64, val } => return write!(f, "{}l", val),
+            IntLit { signed: false, bits: 32, val } => return write!(f, "{}u", val),
+            IntLit { signed: false, bits: 64, val } => return write!(f, "{}ul", val),
             IntLit { signed, bits, val } => {
                 return write!(f, "{:#X}{}{}", val, if *signed { "i" } else { "u" }, bits)
             }
@@ -285,7 +269,7 @@ impl Tok {
                 Tok::SemiColon | Tok::RBraces if parens == 0 => {
                     newline = true;
                     s.write_char('\n')?;
-                },
+                }
                 Tok::LBraces if parens == 0 => {
                     newline = true;
                     s.write_char('\n')?;
@@ -316,12 +300,7 @@ struct Macro {
 
 impl Macro {
     fn disabled() -> Self {
-        Self {
-            sloc: SLoc::unknown(),
-            parameters: vec![],
-            value: vec![],
-            disabled: true
-        }
+        Self { sloc: SLoc::unknown(), parameters: vec![], value: vec![], disabled: true }
     }
 }
 
@@ -356,9 +335,9 @@ impl State {
         for map in self.macros.iter().rev() {
             if let Some(m) = map.get(id) {
                 if m.disabled {
-                    return None
+                    return None;
                 }
-                return Some(m)
+                return Some(m);
             }
         }
         None
@@ -664,14 +643,7 @@ impl File {
                 };
 
                 match i64::from_str_radix(state.buf.as_str(), radix) {
-                    Ok(num) => Ok((
-                        sloc,
-                        Tok::IntLit {
-                            signed,
-                            bits,
-                            val: num,
-                        },
-                    )),
+                    Ok(num) => Ok((sloc, Tok::IntLit { signed, bits, val: num })),
                     Err(e) => Err(Error::InvalidInt(sloc, e)),
                 }
             }
@@ -745,15 +717,19 @@ impl File {
                 let mut pos = (self.pos as isize) - 2;
                 while pos >= 0 && self.data[pos as usize] != b'\n' {
                     if !self.data[pos as usize].is_ascii_whitespace() {
-                        return Err(Error::Lex(sloc,
-                            format!("'#' is only allowed at the start of a line, found: {:?}",
-                                self.data[pos as usize] as char)))
+                        return Err(Error::Lex(
+                            sloc,
+                            format!(
+                                "'#' is only allowed at the start of a line, found: {:?}",
+                                self.data[pos as usize] as char
+                            ),
+                        ));
                     }
                     pos -= 1;
                 }
 
                 Ok((sloc, Tok::StartOfDirective))
-            },
+            }
 
             c => Err(Error::Lex(sloc, format!("unexpected character: {:?}", c))),
         }
@@ -768,15 +744,10 @@ impl Lexer {
                 macros: vec![HashMap::new()],
                 buf: String::with_capacity(128),
             },
-            files: vec![File {
-                path: path.to_owned(),
-                sloc: SLoc::new(path, 1, 0),
-                data,
-                pos: 0,
-            }],
+            files: vec![File { path: path.to_owned(), sloc: SLoc::new(path, 1, 0), data, pos: 0 }],
             peeked: None,
             tokqueue: VecDeque::new(),
-            expand: true
+            expand: true,
         }
     }
 
@@ -785,7 +756,7 @@ impl Lexer {
             sloc: sloc.clone(),
             parameters: vec![],
             value: value.into_iter().map(|t| (sloc.clone(), t.clone())).collect(),
-            disabled: false
+            disabled: false,
         };
         let name = self.state.pool(name);
         self.state.macros.last_mut().unwrap().insert(name, d);
@@ -812,26 +783,28 @@ impl Lexer {
         };
 
         match tok {
-            Tok::Backslash => if !self.expand {
-                Ok((sloc, tok))
-            } else {
-                self.next()
-            },
+            Tok::Backslash => {
+                if !self.expand {
+                    Ok((sloc, tok))
+                } else {
+                    self.next()
+                }
+            }
             Tok::SkipMe => self.next(),
             Tok::StartOfDirective => {
                 self.expand = false;
                 self.directive()?;
                 self.expand = true;
                 self.next()
-            },
+            }
             Tok::EndOfFile if self.files.len() > 1 => {
                 self.files.pop();
                 self.next()
-            },
+            }
             Tok::EndOfMacro => {
                 self.state.macros.pop();
                 self.next()
-            },
+            }
             Tok::Id(id) if let Some(m) = self.state.get_macro(id.as_ref()).cloned() => {
                 if !self.expand {
                     return Ok((sloc, Tok::Id(id)));
@@ -850,15 +823,15 @@ impl Lexer {
                     self.tokqueue.push_front((sloc, tok));
                 }
                 self.next()
-            },
-            tok => Ok((sloc, tok))
+            }
+            tok => Ok((sloc, tok)),
         }
     }
 
     pub fn expect_id(&mut self, errmsg: &str) -> Result<(SLoc, Rc<str>), Error> {
         match self.next()? {
             (sloc, Tok::Id(id)) => Ok((sloc, id)),
-            (sloc, tok) => Err(Error::Lex(sloc, format!("{}, found: '{}'", errmsg, tok)))
+            (sloc, tok) => Err(Error::Lex(sloc, format!("{}, found: '{}'", errmsg, tok))),
         }
     }
 
@@ -878,7 +851,12 @@ impl Lexer {
                     match self.next()?.1 {
                         Tok::Comma => continue,
                         Tok::RParen => break,
-                        tok => return Err(Error::Lex(sloc, format!("expected ',' or ')', found: {}", tok)))
+                        tok => {
+                            return Err(Error::Lex(
+                                sloc,
+                                format!("expected ',' or ')', found: {}", tok),
+                            ))
+                        }
                     }
                 }
             }
@@ -900,9 +878,11 @@ impl Lexer {
                 value.push((nsloc, tok));
             }
 
-            self.state.macros.last_mut().unwrap().insert(name, Macro {
-                sloc, parameters, value, disabled: false
-            });
+            self.state
+                .macros
+                .last_mut()
+                .unwrap()
+                .insert(name, Macro { sloc, parameters, value, disabled: false });
             return Ok(());
         }
 
@@ -934,13 +914,17 @@ impl Lexer {
                 arguments.push(Vec::new());
                 continue;
             }
-            if tok == Tok::LParen { parens += 1; }
-            if tok == Tok::RParen { parens -= 1; }
+            if tok == Tok::LParen {
+                parens += 1;
+            }
+            if tok == Tok::RParen {
+                parens -= 1;
+            }
             arguments.last_mut().unwrap().push((sloc, tok));
         }
 
         if m.parameters.len() != arguments.len() {
-            return Err(Error::Lex(sloc, "macro called with bad number of arguments".to_owned()))
+            return Err(Error::Lex(sloc, "macro called with bad number of arguments".to_owned()));
         }
 
         let mut disabled = HashMap::new();
@@ -959,13 +943,13 @@ impl Lexer {
                         self.tokqueue.push_front((sloc.clone(), tok.clone()));
                     }
                     tok = Tok::SkipMe;
-                    break
+                    break;
                 }
             }
             self.tokqueue.push_front((sloc.clone(), tok));
         }
 
-        return Ok(true)
+        return Ok(true);
     }
 }
 
@@ -977,14 +961,12 @@ mod test {
     fn lex(input: &str) -> Vec<Tok> {
         let buf = input.as_bytes().to_vec();
         let mut lex = Lexer::new(std::path::Path::new("text.c"), buf);
-        lex.def(SLoc::unknown(), "__SHITTYC", &[
-            Tok::IntLit { signed: true, bits: 32, val: 1 }
-        ]);
+        lex.def(SLoc::unknown(), "__SHITTYC", &[Tok::IntLit { signed: true, bits: 32, val: 1 }]);
         let mut toks = Vec::new();
         loop {
             match lex.next().unwrap() {
                 (_, Tok::EndOfFile) => break,
-                (_, tok) => toks.push(tok)
+                (_, tok) => toks.push(tok),
             }
         }
         toks
@@ -1031,23 +1013,26 @@ mod test {
     fn ints() {
         let toks = lex("42,42u,42i8,42u16,42i32,42u64,42ul,42l");
         println!("tokens: {:?}", toks);
-        assert_eq!(toks.as_slice(), &[
-            Tok::IntLit { signed: true, bits: 32, val: 42 },
-            Tok::Comma,
-            Tok::IntLit { signed: false, bits: 32, val: 42 },
-            Tok::Comma,
-            Tok::IntLit { signed: true, bits: 8, val: 42 },
-            Tok::Comma,
-            Tok::IntLit { signed: false, bits: 16, val: 42 },
-            Tok::Comma,
-            Tok::IntLit { signed: true, bits: 32, val: 42 },
-            Tok::Comma,
-            Tok::IntLit { signed: false, bits: 64, val: 42 },
-            Tok::Comma,
-            Tok::IntLit { signed: false, bits: 64, val: 42 },
-            Tok::Comma,
-            Tok::IntLit { signed: true, bits: 64, val: 42 },
-        ]);
+        assert_eq!(
+            toks.as_slice(),
+            &[
+                Tok::IntLit { signed: true, bits: 32, val: 42 },
+                Tok::Comma,
+                Tok::IntLit { signed: false, bits: 32, val: 42 },
+                Tok::Comma,
+                Tok::IntLit { signed: true, bits: 8, val: 42 },
+                Tok::Comma,
+                Tok::IntLit { signed: false, bits: 16, val: 42 },
+                Tok::Comma,
+                Tok::IntLit { signed: true, bits: 32, val: 42 },
+                Tok::Comma,
+                Tok::IntLit { signed: false, bits: 64, val: 42 },
+                Tok::Comma,
+                Tok::IntLit { signed: false, bits: 64, val: 42 },
+                Tok::Comma,
+                Tok::IntLit { signed: true, bits: 64, val: 42 },
+            ]
+        );
     }
 
     #[test]

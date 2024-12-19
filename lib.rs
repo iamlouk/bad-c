@@ -14,11 +14,7 @@ pub struct SLoc {
 
 impl SLoc {
     pub fn unknown() -> Self {
-        Self {
-            file: Rc::from(Path::new("<internal>")),
-            line: 0,
-            col: 0,
-        }
+        Self { file: Rc::from(Path::new("<internal>")), line: 0, col: 0 }
     }
 
     pub fn new(file: &Path, line: usize, col: usize) -> Self {
