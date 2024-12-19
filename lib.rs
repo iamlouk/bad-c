@@ -17,7 +17,7 @@ impl SLoc {
         Self {
             file: Rc::from(Path::new("<internal>")),
             line: 0,
-            col: 0
+            col: 0,
         }
     }
 

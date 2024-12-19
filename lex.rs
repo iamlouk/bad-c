@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::fmt::{Display, Pointer};
+use std::fmt::{Display, Write};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
@@ -244,6 +244,56 @@ impl Display for Tok {
             Colon => ":",
             SemiColon => ";",
         })
+    }
+}
+
+impl Tok {
+    fn replaced(&self, m: &str, value: &Tok) -> Option<Tok> {
+        match self {
+            Tok::Id(id) => if id.as_ref() == m {
+                Some(value.clone())
+            } else {
+                None
+            },
+            _ => {
+                // TODO: Handle keywords etc.!
+                assert!(format!("{}", self) != m);
+                None
+            }
+        }
+    }
+
+    pub fn dump(toks: impl Iterator<Item = Tok>) -> Result<String, std::fmt::Error> {
+        let mut s = String::new();
+        let mut ident = String::new();
+        let mut newline = false;
+        let mut parens = 0;
+        for t in toks {
+            if t == Tok::RBraces {
+                ident.pop();
+            }
+            if newline {
+                s.write_str(&ident)?;
+                newline = false;
+            }
+            write!(&mut s, "{} ", t)?;
+            match t {
+                Tok::LParen => parens += 1,
+                Tok::RParen => parens -= 1,
+                Tok::SemiColon | Tok::RBraces if parens == 0 => {
+                    newline = true;
+                    s.write_char('\n')?;
+                },
+                Tok::LBraces if parens == 0 => {
+                    newline = true;
+                    s.write_char('\n')?;
+                    ident.push('\t');
+                }
+                _ => {}
+            }
+        }
+
+        Ok(s)
     }
 }
 
@@ -771,23 +821,17 @@ impl Lexer {
     }
 
     fn expand_function_macro(&mut self, m: &Macro) -> Result<bool, Error> {
-        // TODO: Check the next token, it must be a '(' but *not* a macro.
-        //       However, in a macro expansion, a '(' is allowed, as long
-        //       as it is not the result of yet another expansion.
-        // FIX:  Disable expansion, self.next(), check if '('. Is not,
-        //       push into tokqueue. If yes, parse arguments. The problem:
-        //       This might break with peeking because the expansion is
-        //       disabled "too late"?
         assert!(self.peeked.is_none() && self.expand);
         self.expand = false;
         let (sloc, tok) = self.next()?;
         self.expand = true;
         if tok != Tok::LParen {
+            // This should work even if the consumed token is a macro because it
+            // was consumed with expansion disabled and tokqueue tokens will be
+            // expanded. This is not true for peeked tokens!
             self.tokqueue.push_front((sloc, tok));
             return Ok(false);
         }
-
-        // Parse arguments...
 
         unimplemented!()
     }
@@ -854,6 +898,14 @@ mod test {
             Tok::Comma,
             Tok::IntLit { signed: true, bits: 64, val: 42 },
         ]);
+    }
+
+    #[test]
+    fn tostring() {
+        let toks = lex("for (int i = 0; i < N; i++) { if (a[i]) { foo(i); } else { bar(i); } }");
+        let s = Tok::dump(toks.into_iter()).unwrap();
+        print!("{}", s);
+        assert_eq!(s, "for ( int i = 0 ; i < N ; i ++ ) { \n\tif ( a [ i ] ) { \n\t\tfoo ( i ) ; \n\t} \n\telse { \n\t\tbar ( i ) ; \n\t} \n} \n");
     }
 
     static FIBS_EXAMPLE: &str = "
