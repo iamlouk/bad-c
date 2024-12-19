@@ -11,6 +11,9 @@ pub enum Tok {
     /* Special: */
     EndOfFile,
     EndOfMacro,
+    Backslash,
+    StartOfDirective,
+    SkipMe,
 
     /* Literals: */
     Id(Rc<str>),
@@ -121,6 +124,9 @@ impl Display for Tok {
         f.write_str(match self {
             EndOfFile => return Ok(()),
             EndOfMacro => return write!(f, "<END-OF-MACRO>"),
+            Backslash => return write!(f, "<BACKSLASH>"),
+            StartOfDirective => return write!(f, "<START-OF-DIRECTIVE>"),
+            SkipMe => return write!(f, "<SKIP-ME>"),
             Id(id) => return write!(f, "{}", &**id),
             String(str) => return write!(f, "{:?}", &**str),
             IntLit {
@@ -248,17 +254,13 @@ impl Display for Tok {
 }
 
 impl Tok {
-    fn replaced(&self, m: &str, value: &Tok) -> Option<Tok> {
+    fn equal_to_str(&self, m: &str) -> bool {
         match self {
-            Tok::Id(id) => if id.as_ref() == m {
-                Some(value.clone())
-            } else {
-                None
-            },
+            Tok::Id(id) => id.as_ref() == m,
             _ => {
                 // TODO: Handle keywords etc.!
                 assert!(format!("{}", self) != m);
-                None
+                false
             }
         }
     }
@@ -304,7 +306,7 @@ struct File {
     pos: usize,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct Macro {
     sloc: SLoc,
     parameters: Vec<Rc<str>>,
@@ -455,12 +457,20 @@ impl File {
                     self.next_u8();
                     Ok((sloc, Tok::LogicalOr))
                 }
+                Some(b'=') => {
+                    self.next_u8();
+                    Ok((sloc, Tok::AssignBitOr))
+                }
                 _ => Ok((sloc, Tok::BitwiseOr)),
             },
             '&' => match self.data.get(self.pos).cloned() {
                 Some(b'&') => {
                     self.next_u8();
                     Ok((sloc, Tok::LogicalAnd))
+                }
+                Some(b'=') => {
+                    self.next_u8();
+                    Ok((sloc, Tok::AssignBitAnd))
                 }
                 _ => Ok((sloc, Tok::Ampersand)),
             },
@@ -730,7 +740,20 @@ impl File {
                 Ok((sloc, Tok::Id(id)))
             }
 
-            '#' => unimplemented!(),
+            '#' => {
+                // Check if this is the first non-whitespace character on this line.
+                let mut pos = (self.pos as isize) - 2;
+                while pos >= 0 && self.data[pos as usize] != b'\n' {
+                    if !self.data[pos as usize].is_ascii_whitespace() {
+                        return Err(Error::Lex(sloc,
+                            format!("'#' is only allowed at the start of a line, found: {:?}",
+                                self.data[pos as usize] as char)))
+                    }
+                    pos -= 1;
+                }
+
+                Ok((sloc, Tok::StartOfDirective))
+            },
 
             c => Err(Error::Lex(sloc, format!("unexpected character: {:?}", c))),
         }
@@ -789,20 +812,32 @@ impl Lexer {
         };
 
         match tok {
+            Tok::Backslash => if !self.expand {
+                Ok((sloc, tok))
+            } else {
+                self.next()
+            },
+            Tok::SkipMe => self.next(),
+            Tok::StartOfDirective => {
+                self.expand = false;
+                self.directive()?;
+                self.expand = true;
+                self.next()
+            },
             Tok::EndOfFile if self.files.len() > 1 => {
                 self.files.pop();
-                return self.next();
+                self.next()
             },
             Tok::EndOfMacro => {
                 self.state.macros.pop();
-                return self.next();
+                self.next()
             },
             Tok::Id(id) if let Some(m) = self.state.get_macro(id.as_ref()).cloned() => {
                 if !self.expand {
                     return Ok((sloc, Tok::Id(id)));
                 }
 
-                if m.parameters.len() > 0 && self.expand_function_macro(&m)? {
+                if m.parameters.len() > 0 && self.expand_function_macro(id.clone(), &m)? {
                     return self.next();
                 }
 
@@ -814,13 +849,67 @@ impl Lexer {
                 for (sloc, tok) in m.value.into_iter().rev() {
                     self.tokqueue.push_front((sloc, tok));
                 }
-                return self.next();
+                self.next()
             },
             tok => Ok((sloc, tok))
         }
     }
 
-    fn expand_function_macro(&mut self, m: &Macro) -> Result<bool, Error> {
+    pub fn expect_id(&mut self, errmsg: &str) -> Result<(SLoc, Rc<str>), Error> {
+        match self.next()? {
+            (sloc, Tok::Id(id)) => Ok((sloc, id)),
+            (sloc, tok) => Err(Error::Lex(sloc, format!("{}, found: '{}'", errmsg, tok)))
+        }
+    }
+
+    fn directive(&mut self) -> Result<(), Error> {
+        // A directive should never be expanded while expanding!
+        assert!(self.peeked.is_none() && self.tokqueue.is_empty());
+        assert!(self.state.macros.len() == 1 && self.expand == false);
+        let (_, dir) = self.expect_id("expected directive")?;
+        if dir.as_ref() == "define" {
+            let (sloc, name) = self.expect_id("expected macro name")?;
+            let mut parameters = vec![];
+            if self.peek()?.1 == Tok::LParen {
+                self.peeked.take();
+                loop {
+                    let (sloc, name) = self.expect_id("expected macro parameter name")?;
+                    parameters.push(name);
+                    match self.next()?.1 {
+                        Tok::Comma => continue,
+                        Tok::RParen => break,
+                        tok => return Err(Error::Lex(sloc, format!("expected ',' or ')', found: {}", tok)))
+                    }
+                }
+            }
+
+            let mut value: Vec<(SLoc, Tok)> = vec![];
+            let mut cline = sloc.line;
+            loop {
+                let (nsloc, tok) = self.next()?;
+                if tok == Tok::Backslash {
+                    cline += 1;
+                    continue;
+                }
+                if nsloc.line != cline || tok == Tok::EndOfFile {
+                    // Push into tokqueue for possible expansion.
+                    // Remember that expansion is disabled here.
+                    self.tokqueue.push_front((nsloc, tok));
+                    break;
+                }
+                value.push((nsloc, tok));
+            }
+
+            self.state.macros.last_mut().unwrap().insert(name, Macro {
+                sloc, parameters, value, disabled: false
+            });
+            return Ok(());
+        }
+
+        unimplemented!()
+    }
+
+    fn expand_function_macro(&mut self, mname: Rc<str>, m: &Macro) -> Result<bool, Error> {
         assert!(self.peeked.is_none() && self.expand);
         self.expand = false;
         let (sloc, tok) = self.next()?;
@@ -833,7 +922,50 @@ impl Lexer {
             return Ok(false);
         }
 
-        unimplemented!()
+        let mut parens = 0;
+        let mut arguments: Vec<Vec<(SLoc, Tok)>> = vec![vec![]];
+        loop {
+            let (sloc, tok) = self.next()?;
+            if parens == 0 && tok == Tok::RParen {
+                self.peeked.take();
+                break;
+            }
+            if parens == 0 && tok == Tok::Comma {
+                arguments.push(Vec::new());
+                continue;
+            }
+            if tok == Tok::LParen { parens += 1; }
+            if tok == Tok::RParen { parens -= 1; }
+            arguments.last_mut().unwrap().push((sloc, tok));
+        }
+
+        if m.parameters.len() != arguments.len() {
+            return Err(Error::Lex(sloc, "macro called with bad number of arguments".to_owned()))
+        }
+
+        let mut disabled = HashMap::new();
+        disabled.insert(mname, Macro::disabled());
+        for p in m.parameters.iter() {
+            disabled.insert(p.clone(), Macro::disabled());
+        }
+        self.state.macros.push(disabled);
+
+        self.tokqueue.push_front((m.sloc.clone(), Tok::EndOfMacro));
+        for (sloc, tok) in m.value.iter().rev() {
+            let mut tok = tok.clone();
+            for (name, value) in m.parameters.iter().zip(arguments.iter()) {
+                if tok.equal_to_str(name.as_ref()) {
+                    for (sloc, tok) in value.iter().rev() {
+                        self.tokqueue.push_front((sloc.clone(), tok.clone()));
+                    }
+                    tok = Tok::SkipMe;
+                    break
+                }
+            }
+            self.tokqueue.push_front((sloc.clone(), tok));
+        }
+
+        return Ok(true)
     }
 }
 
@@ -861,7 +993,6 @@ mod test {
     #[test]
     fn basic() {
         let toks = lex("[foo]+/*comment*/(\"bar\")--42%0x1234 __SHITTYC");
-        println!("tokens: {:?}", toks);
         assert_eq!(toks.len(), 12);
         assert_matches!(toks[0], Tok::LBracket);
         assert_matches!(toks[1], Tok::Id(ref id) if id.as_ref() == "foo");
@@ -875,6 +1006,25 @@ mod test {
         assert_matches!(toks[9], Tok::Modulo);
         assert_matches!(toks[10], Tok::IntLit { signed: true, bits: 32, val: 0x1234 });
         assert_matches!(toks[11], Tok::IntLit { signed: true, bits: 32, val: 1 });
+    }
+
+    #[test]
+    fn macros() {
+        let toks = lex("#define FOO 42\nFOO");
+        let s = Tok::dump(toks.into_iter()).unwrap();
+        assert_eq!(s, "42 ");
+
+        let toks = lex("#define BAR FOO \n #define BAZ BAR \n #define BAR 123 \n BAZ");
+        let s = Tok::dump(toks.into_iter()).unwrap();
+        assert_eq!(s, "123 ");
+
+        let toks = lex("#define min(a, b) (a < b ? a : b)\n min(1, 2)");
+        let s = Tok::dump(toks.into_iter()).unwrap();
+        assert_eq!(s, "( 1 < 2 ? 1 : 2 ) ");
+
+        let toks = lex("#define foo(a, b) (a + b) \n foo(foo(1, 2), (3 * 4))");
+        let s = Tok::dump(toks.into_iter()).unwrap();
+        assert_eq!(s, "( ( 1 + 2 ) + ( 3 * 4 ) ) ");
     }
 
     #[test]
@@ -904,7 +1054,6 @@ mod test {
     fn tostring() {
         let toks = lex("for (int i = 0; i < N; i++) { if (a[i]) { foo(i); } else { bar(i); } }");
         let s = Tok::dump(toks.into_iter()).unwrap();
-        print!("{}", s);
         assert_eq!(s, "for ( int i = 0 ; i < N ; i ++ ) { \n\tif ( a [ i ] ) { \n\t\tfoo ( i ) ; \n\t} \n\telse { \n\t\tbar ( i ) ; \n\t} \n} \n");
     }
 
