@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt::{Display, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::rc::Rc;
 
 use crate::{Error, SLoc};
@@ -284,7 +284,6 @@ impl Tok {
 }
 
 struct File {
-    path: PathBuf,
     sloc: SLoc,
     data: Vec<u8>,
     pos: usize,
@@ -344,7 +343,7 @@ impl State {
     }
 }
 
-struct Lexer {
+pub struct Lexer {
     files: Vec<File>,
     state: State,
     peeked: Option<(SLoc, Tok)>,
@@ -359,7 +358,7 @@ impl File {
         self.data.get(self.pos - 1).cloned()
     }
 
-    fn skip_whitespace(self: &mut Self) -> bool {
+    fn skip_whitespace(&mut self) -> bool {
         while self.pos < self.data.len() {
             match self.data[self.pos] {
                 b' ' | b'\t' | b'\r' => {
@@ -402,7 +401,7 @@ impl File {
                 _ => return false,
             }
         }
-        return true;
+        true
     }
 
     fn next(&mut self, state: &mut State) -> Result<(SLoc, Tok), Error> {
@@ -627,10 +626,14 @@ impl File {
                             }
                             (Some(x), _) if !x.is_ascii_alphanumeric() => (signed, 32),
                             (None, _) => (signed, 32),
-                            _ => {
+                            (a, b) => {
                                 return Err(Error::Lex(
                                     sloc,
-                                    format!("unexpected interger literal suffix"),
+                                    format!(
+                                        "unexpected interger literal suffix: {}{}",
+                                        a.unwrap_or(b' ') as char,
+                                        b.unwrap_or(b' ') as char
+                                    ),
                                 ))
                             }
                         }
@@ -744,7 +747,7 @@ impl Lexer {
                 macros: vec![HashMap::new()],
                 buf: String::with_capacity(128),
             },
-            files: vec![File { path: path.to_owned(), sloc: SLoc::new(path, 1, 0), data, pos: 0 }],
+            files: vec![File { sloc: SLoc::new(path, 1, 0), data, pos: 0 }],
             peeked: None,
             tokqueue: VecDeque::new(),
             expand: true,
@@ -817,7 +820,6 @@ impl Lexer {
                 let mut disabled = HashMap::new();
                 disabled.insert(id, Macro::disabled());
                 self.state.macros.push(disabled);
-                assert!(m.parameters.len() == 0);
                 self.tokqueue.push_front((m.sloc, Tok::EndOfMacro));
                 for (sloc, tok) in m.value.into_iter().rev() {
                     self.tokqueue.push_front((sloc, tok));
@@ -949,7 +951,19 @@ impl Lexer {
             self.tokqueue.push_front((sloc.clone(), tok));
         }
 
-        return Ok(true);
+        Ok(true)
+    }
+}
+
+impl Iterator for Lexer {
+    type Item = Result<(SLoc, Tok), Error>;
+
+    fn next(&mut self) -> Option<<Self as Iterator>::Item> {
+        match self.next() {
+            Err(e) => Some(Err(e)),
+            Ok((_, Tok::EndOfFile)) => None,
+            Ok((sloc, tok)) => Some(Ok((sloc, tok))),
+        }
     }
 }
 
@@ -1007,6 +1021,18 @@ mod test {
         let toks = lex("#define foo(a, b) (a + b) \n foo(foo(1, 2), (3 * 4))");
         let s = Tok::dump(toks.into_iter()).unwrap();
         assert_eq!(s, "( ( 1 + 2 ) + ( 3 * 4 ) ) ");
+
+        /*
+         * FIXME: Currently failing/known bugs:
+         * https://gcc.gnu.org/onlinedocs/cppinternals/Macro-Expansion.html
+         *
+         *   #define foo(x) bar x
+         *   foo(foo) (2)
+         *
+         * should return "bar foo (2)" but instead currently expands to:
+         *
+         *   bar bar x ( 2 )
+         */
     }
 
     #[test]

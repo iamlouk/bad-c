@@ -11,3 +11,7 @@ overflow-checks = false # Disable integer overflow checks.
 path = "./lib.rs"
 
 [dependencies]
+
+[[bin]]
+name = "cpp"
+path = "bin/cpp.rs"
