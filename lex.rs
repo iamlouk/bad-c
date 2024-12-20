@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt::{Display, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use crate::{Error, SLoc};
@@ -241,6 +241,8 @@ impl Tok {
     fn equal_to_str(&self, m: &str) -> bool {
         match self {
             Tok::Id(id) => id.as_ref() == m,
+            Tok::If => "if" == m,
+            Tok::Else => "else" == m,
             _ => {
                 // TODO: Handle keywords etc.!
                 assert!(format!("{}", self) != m);
@@ -349,6 +351,8 @@ pub struct Lexer {
     peeked: Option<(SLoc, Tok)>,
     tokqueue: VecDeque<(SLoc, Tok)>,
     expand: bool,
+    ifdef_stack: Vec<bool>,
+    pub include_paths: Vec<PathBuf>,
 }
 
 impl File {
@@ -747,10 +751,12 @@ impl Lexer {
                 macros: vec![HashMap::new()],
                 buf: String::with_capacity(128),
             },
-            files: vec![File { sloc: SLoc::new(path, 1, 0), data, pos: 0 }],
+            files: vec![File { sloc: SLoc::new(path, 1, 1), data, pos: 0 }],
             peeked: None,
             tokqueue: VecDeque::new(),
             expand: true,
+            ifdef_stack: vec![],
+            include_paths: vec![],
         }
     }
 
@@ -758,7 +764,7 @@ impl Lexer {
         let d = Macro {
             sloc: sloc.clone(),
             parameters: vec![],
-            value: value.into_iter().map(|t| (sloc.clone(), t.clone())).collect(),
+            value: value.iter().map(|t| (sloc.clone(), t.clone())).collect(),
             disabled: false,
         };
         let name = self.state.pool(name);
@@ -774,6 +780,7 @@ impl Lexer {
         Ok(res)
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> Result<(SLoc, Tok), Error> {
         if let Some((sloc, tok)) = self.peeked.take() {
             return Ok((sloc, tok));
@@ -786,25 +793,21 @@ impl Lexer {
         };
 
         match tok {
-            Tok::Backslash => {
-                if !self.expand {
-                    Ok((sloc, tok))
-                } else {
-                    self.next()
-                }
-            }
+            Tok::Backslash if self.expand => self.next(),
             Tok::SkipMe => self.next(),
-            Tok::StartOfDirective => {
+            Tok::StartOfDirective if self.expand => {
                 self.expand = false;
                 self.directive()?;
                 self.expand = true;
                 self.next()
             }
             Tok::EndOfFile if self.files.len() > 1 => {
+                assert!(self.expand);
                 self.files.pop();
                 self.next()
             }
             Tok::EndOfMacro => {
+                assert!(self.expand);
                 self.state.macros.pop();
                 self.next()
             }
@@ -813,7 +816,7 @@ impl Lexer {
                     return Ok((sloc, Tok::Id(id)));
                 }
 
-                if m.parameters.len() > 0 && self.expand_function_macro(id.clone(), &m)? {
+                if !m.parameters.is_empty() && self.expand_function_macro(id.clone(), &m)? {
                     return self.next();
                 }
 
@@ -840,9 +843,9 @@ impl Lexer {
     fn directive(&mut self) -> Result<(), Error> {
         // A directive should never be expanded while expanding!
         assert!(self.peeked.is_none() && self.tokqueue.is_empty());
-        assert!(self.state.macros.len() == 1 && self.expand == false);
-        let (_, dir) = self.expect_id("expected directive")?;
-        if dir.as_ref() == "define" {
+        assert!(self.state.macros.len() == 1 && !self.expand);
+        let (sloc, dir) = self.next()?;
+        if dir.equal_to_str("define") {
             let (sloc, name) = self.expect_id("expected macro name")?;
             let mut parameters = vec![];
             if self.peek()?.1 == Tok::LParen {
@@ -888,7 +891,90 @@ impl Lexer {
             return Ok(());
         }
 
-        unimplemented!()
+        if dir.equal_to_str("include") {
+            assert!(self.peek()?.1 != Tok::Smaller, "unimplemented");
+            let s = match self.next()? {
+                (_, Tok::String(s)) => s,
+                (sloc, tok) => {
+                    return Err(Error::Lex(
+                        sloc,
+                        format!("expected a string after the include directive, got: {}", tok),
+                    ))
+                }
+            };
+
+            let mut filepath = PathBuf::new();
+            for dir in self.include_paths.iter() {
+                filepath.clear();
+                filepath.push(dir);
+                filepath.push(s.as_ref());
+                eprintln!("-> {:?}", &filepath);
+                if filepath.exists() {
+                    let data =
+                        std::fs::read_to_string(&filepath).map_err(|e| Error::IO(sloc, e))?;
+                    self.files.push(File {
+                        sloc: SLoc::new(&filepath, 1, 1),
+                        data: data.into_bytes(),
+                        pos: 0,
+                    });
+                    return Ok(());
+                }
+            }
+
+            return Err(Error::Lex(sloc, format!("included file not found: {:?}", s.as_ref())));
+        }
+
+        if dir.equal_to_str("ifdef") {
+            let (_, id) = self.expect_id("expected a identifier after '#ifdef'")?;
+            let defined = self.state.macros[0].contains_key(id.as_ref());
+            return self.directive_cond(defined);
+        }
+
+        if dir.equal_to_str("ifndef") {
+            let (_, id) = self.expect_id("expected a identifier after '#if<n>def'")?;
+            let defined = self.state.macros[0].contains_key(id.as_ref());
+            return self.directive_cond(!defined);
+        }
+
+        if dir.equal_to_str("endif") {
+            self.ifdef_stack.pop();
+            return Ok(());
+        }
+
+        if dir.equal_to_str("else") {
+            self.ifdef_stack.pop().unwrap();
+            self.directive_cond(false)?;
+            return Ok(());
+        }
+
+        unimplemented!("directive: {}", dir)
+    }
+
+    fn directive_cond(&mut self, enabled: bool) -> Result<(), Error> {
+        assert!(!self.expand && self.state.macros.len() == 1);
+        let prev_depth = self.ifdef_stack.len();
+        self.ifdef_stack.push(enabled);
+        if !enabled {
+            while self.ifdef_stack.len() != prev_depth {
+                let (_, tok) = self.next()?;
+                if tok != Tok::StartOfDirective {
+                    continue;
+                }
+                let (_, dir) = self.next()?;
+                if dir.equal_to_str("ifdef") || dir.equal_to_str("ifndef") || dir.equal_to_str("if")
+                {
+                    self.ifdef_stack.push(true);
+                } else if dir.equal_to_str("else") && prev_depth == self.ifdef_stack.len() + 1 {
+                    self.ifdef_stack.pop();
+                    self.ifdef_stack.push(true);
+                    return Ok(());
+                } else if dir.equal_to_str("endif") {
+                    self.ifdef_stack.pop();
+                }
+            }
+            return Ok(());
+        }
+        return Ok(());
     }
 
     fn expand_function_macro(&mut self, mname: Rc<str>, m: &Macro) -> Result<bool, Error> {
@@ -976,6 +1062,9 @@ mod test {
         let buf = input.as_bytes().to_vec();
         let mut lex = Lexer::new(std::path::Path::new("text.c"), buf);
         lex.def(SLoc::unknown(), "__SHITTYC", &[Tok::IntLit { signed: true, bits: 32, val: 1 }]);
+        let mut d = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        d.push("tests/include");
+        lex.include_paths.push(d);
         let mut toks = Vec::new();
         loop {
             match lex.next().unwrap() {
@@ -1002,6 +1091,13 @@ mod test {
         assert_matches!(toks[9], Tok::Modulo);
         assert_matches!(toks[10], Tok::IntLit { signed: true, bits: 32, val: 0x1234 });
         assert_matches!(toks[11], Tok::IntLit { signed: true, bits: 32, val: 1 });
+    }
+
+    #[test]
+    fn include_foo_h() {
+        let toks = lex("#include \"fib.h\"");
+        let s = Tok::dump(toks.into_iter()).unwrap();
+        assert_eq!(s, "extern unsigned fib ( unsigned n ) ; \n");
     }
 
     #[test]
