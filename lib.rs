@@ -1,8 +1,12 @@
 #![feature(assert_matches)]
 #![feature(if_let_guard)]
+#![allow(dead_code)]
 
 use std::path::Path;
 use std::rc::Rc;
+
+pub mod ast;
+pub mod lex;
 
 #[derive(Clone, PartialEq, PartialOrd, Debug)]
 pub struct SLoc {
@@ -32,6 +36,5 @@ pub enum Error {
     EndOfFile(SLoc),
     InvalidInt(SLoc, std::num::ParseIntError),
     Lex(SLoc, String),
+    Type(SLoc, ast::Type, &'static str),
 }
-
-pub mod lex;

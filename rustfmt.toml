@@ -1,1 +1,5 @@
+error_on_line_overflow = true
+error_on_unformatted = true
 use_small_heuristics = "Max"
+enum_discrim_align_threshold = 32
+trailing_semicolon = false

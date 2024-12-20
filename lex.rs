@@ -974,7 +974,7 @@ impl Lexer {
             }
             return Ok(());
         }
-        return Ok(());
+        Ok(())
     }
 
     fn expand_function_macro(&mut self, mname: Rc<str>, m: &Macro) -> Result<bool, Error> {
@@ -1161,7 +1161,12 @@ mod test {
     fn tostring() {
         let toks = lex("for (int i = 0; i < N; i++) { if (a[i]) { foo(i); } else { bar(i); } }");
         let s = Tok::dump(toks.into_iter()).unwrap();
-        assert_eq!(s, "for ( int i = 0 ; i < N ; i ++ ) { \n\tif ( a [ i ] ) { \n\t\tfoo ( i ) ; \n\t} \n\telse { \n\t\tbar ( i ) ; \n\t} \n} \n");
+        assert_eq!(
+            s,
+            "for ( int i = 0 ; i < N ; i ++ ) { \n\
+            \tif ( a [ i ] ) { \n\t\tfoo ( i ) ; \n\
+            \t} \n\telse { \n\t\tbar ( i ) ; \n\t} \n} \n"
+        );
     }
 
     static FIBS_EXAMPLE: &str = "
