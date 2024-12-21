@@ -1,4 +1,5 @@
 use crate::{Error, SLoc};
+use std::collections::HashMap;
 use std::rc::Rc;
 
 #[allow(dead_code)]
@@ -59,17 +60,17 @@ impl Type {
             }
             Type::Ptr { ety, volatile, constant, restrict } => {
                 ety.write("", f)?;
-                // TODO: Check if ety is a function or array, and change repr. in that case.
                 if *volatile {
-                    write!(f, "volatile ")?;
+                    f.write_str("volatile ")?;
                 }
                 if *constant {
-                    write!(f, "constant ")?;
+                    f.write_str("constant ")?;
                 }
+                f.write_char('*')?;
                 if *restrict {
-                    write!(f, "restrict ")?;
+                    f.write_str("restrict ")?;
                 }
-                write!(f, "*{}", decl)
+                f.write_str(decl)
             }
             Type::Array { ety, size: Some(size) } => {
                 ety.write(decl, f)?;
@@ -133,6 +134,7 @@ pub struct Function {
     pub args: Vec<(Rc<str>, Type)>,
     pub body: Option<Box<Stmt>>,
     pub is_static: bool,
+    pub decls: Vec<Rc<Decl>>,
 }
 
 impl Function {
@@ -428,5 +430,42 @@ impl Expr {
                 f.write_str(field)
             }
         }
+    }
+}
+
+#[derive(Debug)]
+pub enum Entry {
+    Structdef { sloc: SLoc, name: Rc<str>, ty: Type },
+    Typedef { sloc: SLoc, name: Rc<str>, ty: Type },
+    Variable { sloc: SLoc, name: Rc<str>, ty: Type, init: Option<Expr> },
+    Function { f: Rc<Function> },
+}
+
+#[derive(Debug)]
+pub struct Unit {
+    pub types: HashMap<Rc<str>, Type>,
+    pub typedefs: HashMap<Rc<str>, Type>,
+    pub globals: HashMap<Rc<str>, Rc<Decl>>,
+    pub entries: Vec<Entry>,
+}
+
+impl Unit {
+    pub fn write(&self, w: &mut dyn std::fmt::Write) -> std::fmt::Result {
+        for e in self.entries.iter() {
+            match e {
+                Entry::Typedef { name, ty, .. } => {
+                    w.write_str("typedef ")?;
+                    ty.write("", w)?;
+                    w.write_char(' ')?;
+                    w.write_str(name)?;
+                    w.write_str("\n\n")?;
+                }
+                Entry::Function { f } => {
+                    f.write(w)?;
+                }
+                _ => unimplemented!(),
+            }
+        }
+        Ok(())
     }
 }

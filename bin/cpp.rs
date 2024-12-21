@@ -1,3 +1,5 @@
+use std::{path::PathBuf, str::FromStr};
+
 use shittyc::lex;
 
 fn main() {
@@ -8,8 +10,9 @@ fn main() {
         std::process::exit(1);
     }
 
-    let l = lex::Lexer::new(std::path::Path::new("<stdin>"), buf);
-    let s = lex::Tok::dump(l.into_iter().map(|res| {
+    let mut l = lex::Lexer::new(std::path::Path::new("<stdin>"), buf);
+    l.include_paths.push(PathBuf::from_str("/usr/include").unwrap());
+    let s = lex::Tok::dump(l.map(|res| {
         if let Err(e) = res {
             eprintln!("{:?}", e);
             std::process::exit(1);

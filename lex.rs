@@ -741,6 +741,18 @@ impl File {
             c => Err(Error::Lex(sloc, format!("unexpected character: {:?}", c))),
         }
     }
+
+    // Parse everything after the `<` in `#include <...>`.
+    fn system_include_path(&mut self, state: &mut State) -> Result<Rc<str>, Error> {
+        state.buf.clear();
+        while let Some(c) = self.next_u8() {
+            if c == b'>' {
+                return Ok(state.get_buf())
+            }
+            state.buf.push(c as char);
+        }
+        Err(Error::Lex(self.sloc.clone(), "expected a path ending in '>'".to_owned()))
+    }
 }
 
 impl Lexer {
@@ -913,9 +925,11 @@ impl Lexer {
         }
 
         if dir.equal_to_str("include") {
-            assert!(self.peek()?.1 != Tok::Smaller, "unimplemented");
             let s = match self.next()? {
                 (_, Tok::String(s)) => s,
+                (_, Tok::Smaller) => {
+                    self.files.last_mut().unwrap().system_include_path(&mut self.state)?
+                }
                 (sloc, tok) => {
                     return Err(Error::Lex(
                         sloc,
@@ -929,7 +943,6 @@ impl Lexer {
                 filepath.clear();
                 filepath.push(dir);
                 filepath.push(s.as_ref());
-                eprintln!("-> {:?}", &filepath);
                 if filepath.exists() {
                     let data =
                         std::fs::read_to_string(&filepath).map_err(|e| Error::IO(sloc, e))?;
@@ -968,7 +981,14 @@ impl Lexer {
             return Ok(());
         }
 
-        unimplemented!("directive: {}", dir)
+        if dir.equal_to_str("undef") {
+            assert!(self.state.macros.len() == 1);
+            let (_, id) = self.expect_id("expected a identifier after '#undef'")?;
+            self.state.macros[0].remove(&id);
+            return Ok(())
+        }
+
+        unimplemented!("directive: {} (sloc: {:?})", dir, sloc)
     }
 
     fn directive_cond(&mut self, enabled: bool) -> Result<(), Error> {
@@ -1155,7 +1175,6 @@ mod test {
     #[test]
     fn ints() {
         let toks = lex("42,42u,42i8,42u16,42i32,42u64,42ul,42l");
-        println!("tokens: {:?}", toks);
         assert_eq!(
             toks.as_slice(),
             &[
@@ -1197,7 +1216,6 @@ mod test {
     #[test]
     fn fibs() {
         let toks = lex(FIBS_EXAMPLE);
-        println!("tokens: {:?}", toks);
         assert_eq!(toks.len(), 35);
         assert_matches!(toks[0], Tok::Extern);
         assert_matches!(toks[1], Tok::Unsigned);
