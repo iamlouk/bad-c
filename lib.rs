@@ -7,6 +7,7 @@ use std::rc::Rc;
 
 pub mod ast;
 pub mod lex;
+pub mod parse;
 
 #[derive(Clone, PartialEq, PartialOrd, Debug)]
 pub struct SLoc {
@@ -36,5 +37,7 @@ pub enum Error {
     EndOfFile(SLoc),
     InvalidInt(SLoc, std::num::ParseIntError),
     Lex(SLoc, String),
+    Unexpected(SLoc, lex::Tok, &'static str),
     Type(SLoc, ast::Type, &'static str),
+    NotAType,
 }

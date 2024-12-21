@@ -348,7 +348,7 @@ impl State {
 pub struct Lexer {
     files: Vec<File>,
     state: State,
-    peeked: Option<(SLoc, Tok)>,
+    pub peeked: Option<(SLoc, Tok)>,
     tokqueue: VecDeque<(SLoc, Tok)>,
     expand: bool,
     ifdef_stack: Vec<bool>,
@@ -780,6 +780,11 @@ impl Lexer {
         Ok(res)
     }
 
+    pub fn unread(&mut self, tok: (SLoc, Tok)) {
+        assert!(self.peeked.is_none());
+        self.peeked = Some(tok);
+    }
+
     #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> Result<(SLoc, Tok), Error> {
         if let Some((sloc, tok)) = self.peeked.take() {
@@ -838,6 +843,22 @@ impl Lexer {
             (sloc, Tok::Id(id)) => Ok((sloc, id)),
             (sloc, tok) => Err(Error::Lex(sloc, format!("{}, found: '{}'", errmsg, tok))),
         }
+    }
+
+    pub fn expect_tok(&mut self, expected: Tok, errmsg: &'static str) -> Result<SLoc, Error> {
+        let (sloc, t) = self.next()?;
+        if t != expected {
+            return Err(Error::Unexpected(sloc, t, errmsg))
+        }
+        Ok(sloc)
+    }
+
+    pub fn consume_if_next(&mut self, t: Tok) -> Result<bool, Error> {
+        if self.peek()?.1 == t {
+            self.peeked.take();
+            return Ok(true)
+        }
+        Ok(false)
     }
 
     fn directive(&mut self) -> Result<(), Error> {

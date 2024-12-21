@@ -21,16 +21,10 @@ impl Type {
         *self == Type::Bool
     }
     pub fn is_numerical(&self) -> bool {
-        match self {
-            Self::Int { .. } => true,
-            _ => false,
-        }
+        matches!(self, Self::Int { .. })
     }
     pub fn is_pointer(&self) -> bool {
-        match self {
-            Self::Ptr { .. } => true,
-            _ => false,
-        }
+        matches!(self, Self::Ptr { .. })
     }
 
     pub fn lookup_field(&self, sloc: &SLoc, name: Rc<str>) -> Result<(Type, usize), Error> {
@@ -43,16 +37,12 @@ impl Type {
         };
 
         for (idx, (fname, ftyp)) in fields.iter().enumerate() {
-            if &**fname == &*name {
+            if **fname == *name {
                 return Ok((ftyp.clone(), idx));
             }
         }
 
-        return Err(Error::Type(
-            sloc.clone(),
-            self.clone(),
-            "struct or union does not have such a field",
-        ));
+        Err(Error::Type(sloc.clone(), self.clone(), "struct or union does not have such a field"))
     }
 
     fn write(&self, decl: &str, f: &mut dyn std::fmt::Write) -> std::fmt::Result {
@@ -143,7 +133,28 @@ pub struct Function {
     pub args: Vec<(Rc<str>, Type)>,
     pub body: Option<Box<Stmt>>,
     pub is_static: bool,
-    pub locals: Vec<Rc<Decl>>,
+}
+
+impl Function {
+    fn write(&self, f: &mut dyn std::fmt::Write) -> std::fmt::Result {
+        f.write_str(if self.is_static { "static " } else { "extern " })?;
+        self.retty.write("", f)?;
+        f.write_str(&self.name)?;
+        f.write_char('(')?;
+        for (i, (argname, argty)) in self.args.iter().enumerate() {
+            f.write_str(if i == 0 { "" } else { ", " })?;
+            argty.write(argname, f)?;
+        }
+        if let Some(body) = &self.body {
+            f.write_str(")\n")?;
+            let mut ident = "   ".to_owned();
+            body.write(&mut ident, f)?;
+            f.write_str("\n")?;
+        } else {
+            f.write_str(";\n\n")?;
+        }
+        Ok(())
+    }
 }
 
 #[allow(dead_code)]
@@ -161,51 +172,94 @@ pub struct Decl {
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum Stmt {
-    NoOp {
-        sloc: SLoc,
-        ident: u8,
-    },
-    Expr {
-        sloc: SLoc,
-        ident: u8,
-        expr: Box<Expr>,
-    },
-    Decls {
-        sloc: SLoc,
-        ident: u8,
-        decls: Vec<Rc<Decl>>,
-    },
-    Compound {
-        sloc: SLoc,
-        ident: u8,
-        stmts: Vec<Stmt>,
-    },
-    While {
-        sloc: SLoc,
-        ident: u8,
-        cond: Box<Expr>,
-        body: Box<Stmt>,
-    },
-    For {
-        sloc: SLoc,
-        ident: u8,
-        init: Box<Stmt>,
-        cond: Box<Expr>,
-        incr: Box<Expr>,
-        body: Box<Stmt>,
-    },
-    If {
-        sloc: SLoc,
-        ident: u8,
-        cond: Box<Expr>,
-        then: Box<Stmt>,
-        otherwise: Option<Box<Stmt>>,
-    },
-    Ret {
-        sloc: SLoc,
-        ident: u8,
-        val: Option<Box<Expr>>,
-    },
+    NoOp { sloc: SLoc },
+    Expr { sloc: SLoc, expr: Box<Expr> },
+    Decls { sloc: SLoc, decls: Vec<Rc<Decl>> },
+    Compound { sloc: SLoc, stmts: Vec<Stmt> },
+    While { sloc: SLoc, cond: Box<Expr>, body: Box<Stmt> },
+    For { sloc: SLoc, init: Box<Stmt>, cond: Box<Expr>, incr: Box<Expr>, body: Box<Stmt> },
+    If { sloc: SLoc, cond: Box<Expr>, then: Box<Stmt>, otherwise: Option<Box<Stmt>> },
+    Ret { sloc: SLoc, val: Option<Box<Expr>> },
+}
+
+impl Stmt {
+    fn write(&self, ident: &mut String, f: &mut dyn std::fmt::Write) -> std::fmt::Result {
+        f.write_str(ident)?;
+        match self {
+            Stmt::NoOp { .. } => f.write_str(";\n"),
+            Stmt::Expr { expr, .. } => {
+                expr.write(f)?;
+                f.write_str(";\n")
+            }
+            Stmt::Decls { decls, .. } => {
+                let decl = decls.first().unwrap();
+                decl.ty.write(&decl.name, f)?;
+                f.write_str(";\n")?;
+                for decl in decls.iter().skip(1) {
+                    f.write_str(ident)?;
+                    decl.ty.write(&decl.name, f)?;
+                    f.write_str(";\n")?;
+                }
+                Ok(())
+            }
+            Stmt::Compound { stmts, .. } => {
+                f.write_str("{\n")?;
+                ident.push(' ');
+                for stmt in stmts {
+                    stmt.write(ident, f)?;
+                }
+                ident.pop();
+                f.write_str(ident)?;
+                f.write_str("}\n")?;
+                Ok(())
+            }
+            Stmt::While { cond, body, .. } => {
+                f.write_str("while (")?;
+                cond.write(f)?;
+                f.write_str(")\n")?;
+                ident.push(' ');
+                body.write(ident, f)?;
+                ident.pop();
+                Ok(())
+            }
+            Stmt::For { init, cond, incr, body, .. } => {
+                f.write_str("for (")?;
+                init.write(&mut String::new(), f)?;
+                f.write_str(ident)?;
+                f.write_str("     ")?;
+                cond.write(f)?;
+                f.write_str("; ")?;
+                incr.write(f)?;
+                f.write_str(")\n")?;
+                ident.push(' ');
+                body.write(ident, f)?;
+                ident.pop();
+                Ok(())
+            }
+            Stmt::If { cond, then, otherwise, .. } => {
+                f.write_str("if (")?;
+                cond.write(f)?;
+                f.write_str(")\n")?;
+                ident.push(' ');
+                then.write(ident, f)?;
+                ident.pop();
+                if let Some(otherwise) = otherwise {
+                    f.write_str(ident)?;
+                    f.write_str("else\n")?;
+                    ident.push(' ');
+                    otherwise.write(ident, f)?;
+                    ident.pop();
+                }
+                Ok(())
+            }
+            Stmt::Ret { val: None, .. } => f.write_str("return;\n"),
+            Stmt::Ret { val: Some(val), .. } => {
+                f.write_str("return ")?;
+                val.write(f)?;
+                f.write_str(";\n")
+            }
+        }
+    }
 }
 
 #[allow(dead_code)]
@@ -293,19 +347,11 @@ impl Expr {
     }
 
     fn is_cmp(op: BinOp) -> bool {
-        match op {
-            BinOp::EQ | BinOp::NE | BinOp::GE | BinOp::GT | BinOp::LE | BinOp::LT => true,
-            _ => false,
-        }
+        matches!(op, BinOp::EQ | BinOp::NE | BinOp::GE | BinOp::GT | BinOp::LE | BinOp::LT)
     }
 
     fn is_assignable(&self) -> bool {
-        match self {
-            Expr::Id { .. } => true,
-            Expr::Deref { .. } => true,
-            Expr::FieldAccess { .. } => true,
-            _ => false,
-        }
+        matches!(self, Expr::Id { .. } | Expr::Deref { .. } | Expr::FieldAccess { .. })
     }
 
     pub fn is_constant(&self, max: i64) -> Option<i64> {
