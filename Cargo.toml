@@ -2,6 +2,7 @@
 name = "shittyc"
 version = "0.1.0"
 edition = "2021"
+description = "A bad subset-of-C compiler"
 
 [profile.dev]
 opt-level = 1           # Use slightly better optimizations.
@@ -9,9 +10,10 @@ overflow-checks = false # Disable integer overflow checks.
 
 [lib]
 path = "./lib.rs"
-
-[dependencies]
+test = true
+doctest = false
 
 [[bin]]
 name = "cpp"
 path = "bin/cpp.rs"
+test = false

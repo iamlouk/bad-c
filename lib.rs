@@ -40,4 +40,5 @@ pub enum Error {
     Unexpected(SLoc, lex::Tok, &'static str),
     Type(SLoc, ast::Type, &'static str),
     NotAType,
+    UnknownSymbol(SLoc, Rc<str>),
 }

@@ -194,12 +194,15 @@ impl Stmt {
                 f.write_str(";\n")
             }
             Stmt::Decls { decls, .. } => {
-                let decl = decls.first().unwrap();
-                decl.ty.write(&decl.name, f)?;
-                f.write_str(";\n")?;
-                for decl in decls.iter().skip(1) {
-                    f.write_str(ident)?;
+                for (i, decl) in decls.iter().enumerate() {
+                    if i != 0 {
+                        f.write_str(ident)?;
+                    }
                     decl.ty.write(&decl.name, f)?;
+                    if let Some(init) = decl.init.as_ref() {
+                        f.write_str(" = ")?;
+                        init.write(f)?;
+                    }
                     f.write_str(";\n")?;
                 }
                 Ok(())
@@ -265,7 +268,7 @@ impl Stmt {
 }
 
 #[allow(dead_code)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum BinOp {
     EQ,
     NE,
@@ -308,7 +311,7 @@ pub enum Expr {
 }
 
 impl Expr {
-    fn get_typ(&self) -> Type {
+    pub fn get_typ(&self) -> Type {
         (match self {
             Expr::Id { typ, .. } => typ,
             Expr::IntLit { typ, .. } => typ,
@@ -348,11 +351,11 @@ impl Expr {
         }
     }
 
-    fn is_cmp(op: BinOp) -> bool {
+    pub fn is_cmp(op: BinOp) -> bool {
         matches!(op, BinOp::EQ | BinOp::NE | BinOp::GE | BinOp::GT | BinOp::LE | BinOp::LT)
     }
 
-    fn is_assignable(&self) -> bool {
+    pub fn is_assignable(&self) -> bool {
         matches!(self, Expr::Id { .. } | Expr::Deref { .. } | Expr::FieldAccess { .. })
     }
 
@@ -368,14 +371,14 @@ impl Expr {
             Expr::Id { name, .. } => write!(f, "{}", name),
             Expr::IntLit { num, .. } => write!(f, "{:#x}", num),
             Expr::Assign { op: Some(op), lhs, rhs, .. } => {
-                f.write_char(')')?;
+                f.write_char('(')?;
                 lhs.write(f)?;
                 write!(f, ") {}= (", Expr::binop_to_str(*op))?;
                 rhs.write(f)?;
                 f.write_char(')')
             }
             Expr::Assign { op: None, lhs, rhs, .. } => {
-                f.write_char(')')?;
+                f.write_char('(')?;
                 lhs.write(f)?;
                 f.write_str(") = (")?;
                 rhs.write(f)?;
@@ -441,12 +444,13 @@ pub enum Entry {
     Function { f: Rc<Function> },
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Unit {
     pub types: HashMap<Rc<str>, Type>,
     pub typedefs: HashMap<Rc<str>, Type>,
-    pub globals: HashMap<Rc<str>, Rc<Decl>>,
     pub entries: Vec<Entry>,
+    pub local_decls: Vec<Rc<Decl>>,
+    pub scopes: Vec<HashMap<Rc<str>, Rc<Decl>>>,
 }
 
 impl Unit {
