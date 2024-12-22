@@ -8,6 +8,9 @@ description = "A bad subset-of-C compiler"
 opt-level = 1           # Use slightly better optimizations.
 overflow-checks = false # Disable integer overflow checks.
 
+[dependencies]
+bit-set = { version = "*", features = [] }
+
 [lib]
 path = "./lib.rs"
 test = true

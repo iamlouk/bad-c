@@ -8,6 +8,7 @@ use std::rc::Rc;
 pub mod ast;
 pub mod lex;
 pub mod parse;
+pub mod ir;
 
 #[derive(Clone, PartialEq, PartialOrd, Debug)]
 pub struct SLoc {
