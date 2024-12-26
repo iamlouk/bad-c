@@ -219,7 +219,7 @@ fn parse_stmt(state: &mut Unit, lex: &mut Lexer) -> Result<Stmt, Error> {
                 ty,
                 init,
                 idx: 0,
-                stack_slot: RefCell::new(None)
+                stack_slot: RefCell::new(None),
             });
             decls.push(d.clone());
             state.scopes.last_mut().unwrap().insert(name, d.clone());
@@ -374,13 +374,13 @@ fn parse_final_expr(state: &mut Unit, lex: &mut Lexer) -> Result<Box<Expr>, Erro
             Tok::Dot => {
                 let (sloc, _) = lex.next()?;
                 let field = lex.expect_id("field name")?.1;
-                let (typ, idx) = expr.get_typ().lookup_field(&sloc, field.clone())?;
-                Box::new(Expr::FieldAccess { sloc, typ, obj: expr, field, idx })
+                let (typ, _, offset) = expr.get_typ().lookup_field(&sloc, field.clone())?;
+                Box::new(Expr::FieldAccess { sloc, typ, obj: expr, field, offset })
             }
             Tok::Arrow => {
                 let (sloc, _) = lex.next()?;
                 let field = lex.expect_id("field name")?.1;
-                let (styp, (typ, idx)) = match expr.get_typ() {
+                let (styp, (typ, _, offset)) = match expr.get_typ() {
                     Type::Ptr { ety, .. } => (ety.clone(), ety.lookup_field(&sloc, field.clone())?),
                     t => return Err(Error::Type(sloc, t, "expected a pointer to a struct")),
                 };
@@ -389,7 +389,7 @@ fn parse_final_expr(state: &mut Unit, lex: &mut Lexer) -> Result<Box<Expr>, Erro
                     typ,
                     obj: Box::new(Expr::Deref { sloc, typ: (*styp).clone(), ptr: expr }),
                     field,
-                    idx,
+                    offset,
                 })
             }
             Tok::LBracket => {
@@ -468,7 +468,16 @@ fn parse_function(
     let (sloc, t) = lex.peeked.take().unwrap();
     assert!(t == Tok::LParen);
     assert!(state.local_decls.is_empty() && state.scopes.len() == 1);
-    let mut f = Function { name, sloc, retty, args: vec![], body: None, is_static, decls: vec![], ir: RefCell::new(Vec::new()) };
+    let mut f = Function {
+        name,
+        sloc,
+        retty,
+        args: vec![],
+        body: None,
+        is_static,
+        decls: vec![],
+        ir: RefCell::new(Vec::new()),
+    };
     lex.peeked.take();
     state.scopes.push(HashMap::new());
     if !lex.consume_if_next(Tok::RParen)? {
@@ -486,7 +495,7 @@ fn parse_function(
                 ty,
                 init: None,
                 idx: f.decls.len(),
-                stack_slot: RefCell::new(None)
+                stack_slot: RefCell::new(None),
             });
 
             state.scopes[1].insert(name, d.clone());

@@ -1,7 +1,9 @@
 use crate::{ir, Error, SLoc};
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::cell::RefCell;
+
+type Field = (Rc<str>, Type, usize);
 
 #[allow(dead_code)]
 #[derive(Clone, PartialEq, Eq, PartialOrd, Debug)]
@@ -12,8 +14,8 @@ pub enum Type {
     Int { bits: u8, signed: bool },
     Ptr { ety: Rc<Type>, volatile: bool, constant: bool, restrict: bool },
     Array { ety: Rc<Type>, size: Option<usize> },
-    Struct { name: Option<Rc<str>>, fields: Rc<Vec<(Rc<str>, Type)>> },
-    Union { name: Option<Rc<str>>, fields: Rc<Vec<(Rc<str>, Type)>> },
+    Struct { name: Option<Rc<str>>, fields: Rc<Vec<Field>>, size: usize, alignment: usize },
+    Union { name: Option<Rc<str>>, fields: Rc<Vec<Field>>, size: usize, alignment: usize },
     Enum { name: Option<Rc<str>>, vals: Rc<Vec<(Rc<str>, i32)>> },
     Fn { retty: Rc<Type>, argtys: Rc<Vec<(Rc<str>, Type)>> },
 }
@@ -29,18 +31,77 @@ impl Type {
         matches!(self, Self::Ptr { .. })
     }
 
-    pub fn lookup_field(&self, sloc: &SLoc, name: Rc<str>) -> Result<(Type, usize), Error> {
+    pub fn ety(&self) -> Rc<Type> {
+        match self {
+            Type::Ptr { ety, .. } => ety.clone(),
+            Type::Array { ety, .. } => ety.clone(),
+            _ => panic!("not a pointer or array!"),
+        }
+    }
+
+    pub fn sizeof(&self) -> usize {
+        match self {
+            Type::Bool => 1,
+            Type::Int { bits, .. } => {
+                assert!(bits.is_power_of_two());
+                (*bits as usize) / 8
+            }
+            Type::Ptr { .. } => 8, // TODO: Make portable!
+            Type::Array { ety, size: Some(size) } => ety.sizeof() * size,
+            Type::Struct { size, .. } => *size,
+            Type::Union { size, .. } => *size,
+            _ => unimplemented!(),
+        }
+    }
+
+    pub fn alignment(&self) -> usize {
+        match self {
+            Type::Struct { alignment, .. } => *alignment,
+            _ => self.sizeof(),
+        }
+    }
+
+    pub fn initialize_offsets_size_and_alignment(&mut self) {
+        if let Type::Struct { name: _, fields, size, alignment } = self {
+            let mut max_alignment = 0;
+            let mut off = 0;
+            for (_, ty, offset) in Rc::get_mut(fields).unwrap().iter_mut() {
+                let size = ty.sizeof();
+                let align = ty.alignment();
+                max_alignment = max_alignment.max(align);
+                *offset = off + (align - off % align);
+                off = *offset;
+                _ = size;
+            }
+            *size = off + (max_alignment - off % max_alignment);
+            *alignment = max_alignment;
+        }
+        if let Type::Union { name: _, fields, size, alignment } = self {
+            let mut max_size = 0;
+            let mut max_alignment = 0;
+            for (_, ty, offset) in Rc::get_mut(fields).unwrap().iter_mut() {
+                *offset = 0;
+                max_size = max_size.max(ty.sizeof());
+                max_alignment = max_alignment.max(ty.alignment());
+            }
+            *size = max_size;
+            *alignment = max_alignment;
+        }
+        panic!("size calc. not needed here!")
+    }
+
+    pub fn lookup_field(&self, sloc: &SLoc, name: Rc<str>) -> Result<(Type, usize, usize), Error> {
         let fields = match self {
-            Type::Struct { name: _, fields } => fields,
-            Type::Union { name: _, fields } => fields,
+            Type::Struct { fields, .. } => fields,
+            Type::Union { fields, .. } => fields,
             other => {
                 return Err(Error::Type(sloc.clone(), other.clone(), "struct or union expected"))
             }
         };
 
-        for (idx, (fname, ftyp)) in fields.iter().enumerate() {
+        for (idx, (fname, ftyp, offset)) in fields.iter().enumerate() {
             if **fname == *name {
-                return Ok((ftyp.clone(), idx));
+                return Ok((ftyp.clone(), idx, *offset));
             }
         }
 
@@ -81,23 +142,23 @@ impl Type {
                 ety.write(decl, f)?;
                 f.write_str("[]")
             }
-            Type::Struct { name: Some(name), fields: _ } => {
+            Type::Struct { name: Some(name), .. } => {
                 write!(f, "struct {} {}", name, decl)
             }
-            Type::Struct { name: None, fields } => {
+            Type::Struct { name: None, fields, .. } => {
                 write!(f, "struct {{ ")?;
-                for (field_name, typ) in fields.iter() {
+                for (field_name, typ, _) in fields.iter() {
                     typ.write(field_name, f)?;
                     f.write_str("; ")?;
                 }
                 write!(f, "}} {}", decl)
             }
-            Type::Union { name: Some(name), fields: _ } => {
+            Type::Union { name: Some(name), .. } => {
                 write!(f, "union {} {}", name, decl)
             }
-            Type::Union { name: None, fields } => {
+            Type::Union { name: None, fields, .. } => {
                 write!(f, "union {{ ")?;
-                for (field_name, typ) in fields.iter() {
+                for (field_name, typ, _) in fields.iter() {
                     typ.write(field_name, f)?;
                     write!(f, ";")?;
                 }
@@ -132,7 +193,7 @@ impl std::fmt::Display for Type {
             Type::Bool => write!(f, "bool"),
             Type::Int { bits, signed: false } => write!(f, "u{}", bits),
             Type::Int { bits, signed: true } => write!(f, "s{}", bits),
-            _ => self.write("", f)
+            _ => self.write("", f),
         }
     }
 }
@@ -147,7 +208,7 @@ pub struct Function {
     pub body: Option<Box<Stmt>>,
     pub is_static: bool,
     pub decls: Vec<Rc<Decl>>,
-    pub ir: RefCell<Vec<Rc<ir::Block>>>
+    pub ir: RefCell<Vec<Rc<ir::Block>>>,
 }
 
 impl Function {
@@ -182,7 +243,7 @@ pub struct Decl {
     pub ty: Type,
     pub init: Option<Box<Expr>>,
     pub idx: usize,
-    pub stack_slot: std::cell::RefCell<Option<Rc<ir::Inst>>>
+    pub stack_slot: std::cell::RefCell<Option<Rc<ir::Inst>>>,
 }
 
 #[allow(dead_code)]
@@ -319,9 +380,10 @@ pub enum Expr {
     Cast { sloc: SLoc, typ: Type, val: Box<Expr> },
     UnaryOp { sloc: SLoc, typ: Type, op: UnaryOp, val: Box<Expr> },
     BinOp { sloc: SLoc, typ: Type, op: BinOp, lhs: Box<Expr>, rhs: Box<Expr> },
+    PtrAdd { sloc: SLoc, pty: Type, ptr: Box<Expr>, offset: Box<Expr> },
     Call { sloc: SLoc, typ: Type, func: Box<Expr>, args: Vec<Expr> },
     Deref { sloc: SLoc, typ: Type, ptr: Box<Expr> },
-    FieldAccess { sloc: SLoc, typ: Type, obj: Box<Expr>, field: Rc<str>, idx: usize },
+    FieldAccess { sloc: SLoc, typ: Type, obj: Box<Expr>, field: Rc<str>, offset: usize },
 }
 
 impl Expr {
@@ -333,6 +395,7 @@ impl Expr {
             Expr::Cast { typ, .. } => typ,
             Expr::UnaryOp { typ, .. } => typ,
             Expr::BinOp { typ, .. } => typ,
+            Expr::PtrAdd { pty, .. } => pty,
             Expr::Call { typ, .. } => typ,
             Expr::Deref { typ, .. } => typ,
             Expr::FieldAccess { typ, .. } => typ,
@@ -399,9 +462,9 @@ impl Expr {
                 f.write_char(')')
             }
             Expr::Cast { typ, val, .. } => {
-                write!(f, "(")?;
+                f.write_char('(')?;
                 typ.write("", f)?;
-                write!(f, ")")?;
+                f.write_char(')')?;
                 val.write(f)
             }
             Expr::UnaryOp { op, val, .. } => {
@@ -420,6 +483,15 @@ impl Expr {
                 write!(f, ") {} (", Expr::binop_to_str(*op))?;
                 rhs.write(f)?;
                 f.write_char(')')
+            }
+            Expr::PtrAdd { pty, ptr, offset, .. } => {
+                f.write_char('(')?;
+                pty.write("", f)?;
+                f.write_str(")((const char *)")?;
+                ptr.write(f)?;
+                f.write_str(" + (")?;
+                offset.write(f)?;
+                write!(f, " * {}))", pty.ety().sizeof())
             }
             Expr::Call { func, args, .. } => {
                 if !func.is_id() {

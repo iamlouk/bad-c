@@ -1,8 +1,11 @@
-use crate::{ast::{BinOp, Decl, Type, Expr}, SLoc};
-use std::rc::{Rc, Weak};
+use crate::{
+    ast::{BinOp, Decl, Expr, Type},
+    SLoc,
+};
+use bit_set::BitSet;
 use std::cell::{Cell, RefCell};
 use std::fmt::Write;
-use bit_set::BitSet;
+use std::rc::{Rc, Weak};
 
 static IDGEN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
@@ -48,7 +51,7 @@ impl std::fmt::Display for Inst {
             OpC::BinOp { signed: true, op } => write!(f, "{}s", Expr::binop_to_str(*op))?,
             OpC::BinOp { signed: false, op } => write!(f, "{}u", Expr::binop_to_str(*op))?,
             OpC::Cmp { signed: true, op } => write!(f, "cmps {}", Expr::binop_to_str(*op))?,
-        OpC::Cmp { signed: false, op } => write!(f, "cmpu {}", Expr::binop_to_str(*op))?,
+            OpC::Cmp { signed: false, op } => write!(f, "cmpu {}", Expr::binop_to_str(*op))?,
             OpC::Cast => write!(f, "cast to {}:", self.ty)?,
             OpC::Br => write!(f, "br")?,
             OpC::Call => write!(f, "call")?,
@@ -78,7 +81,7 @@ impl Inst {
             ty,
             reg: Cell::new(u64::MAX),
             sloc,
-            opc
+            opc,
         })
     }
 
@@ -128,7 +131,9 @@ impl std::fmt::Display for Block {
         }
         f.write_str(" ], doms=[")?;
         let doms = self.doms.borrow();
-        for idx in doms.iter() { write!(f, " .bb{}", idx)?; }
+        for idx in doms.iter() {
+            write!(f, " .bb{}", idx)?;
+        }
         f.write_str(" ]\n")?;
         let instrs = self.instrs.borrow();
         for inst in instrs.iter() {
@@ -154,7 +159,7 @@ impl Block {
             doms: RefCell::new(BitSet::new()),
             preds: RefCell::new(Vec::new()),
             succs: RefCell::new(Vec::new()),
-            instrs: RefCell::new(Vec::new())
+            instrs: RefCell::new(Vec::new()),
         });
         bbs.push(bb.clone());
         bb
@@ -234,12 +239,15 @@ impl Block {
                             assert!(Block::dominates(&op.block.borrow().upgrade().unwrap(), pred));
                         }
                         continue;
-                    },
+                    }
                     OpC::Br => {
                         assert!(i == len - 1, "missing terminator");
                         assert!(inst.ty == Type::Void);
-                        assert!((ops.len() == 0 && succs.len() == 1) || (ops.len() == 1 && succs.len() == 2));
-                    },
+                        assert!(
+                            (ops.len() == 0 && succs.len() == 1)
+                                || (ops.len() == 1 && succs.len() == 2)
+                        );
+                    }
                     OpC::Ret => {
                         assert!(i == len - 1, "missing terminator");
                         assert!(inst.ty == Type::Void && succs.len() == 0 && ops.len() <= 1);
