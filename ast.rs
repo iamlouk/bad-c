@@ -1,6 +1,7 @@
-use crate::{Error, SLoc};
+use crate::{ir, Error, SLoc};
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::cell::RefCell;
 
 #[allow(dead_code)]
 #[derive(Clone, PartialEq, Eq, PartialOrd, Debug)]
@@ -146,6 +147,7 @@ pub struct Function {
     pub body: Option<Box<Stmt>>,
     pub is_static: bool,
     pub decls: Vec<Rc<Decl>>,
+    pub ir: RefCell<Vec<Rc<ir::Block>>>
 }
 
 impl Function {
@@ -180,6 +182,7 @@ pub struct Decl {
     pub ty: Type,
     pub init: Option<Box<Expr>>,
     pub idx: usize,
+    pub stack_slot: std::cell::RefCell<Option<Rc<ir::Inst>>>
 }
 
 #[allow(dead_code)]

@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::collections::HashMap;
 
 use crate::ast::*;
@@ -218,6 +219,7 @@ fn parse_stmt(state: &mut Unit, lex: &mut Lexer) -> Result<Stmt, Error> {
                 ty,
                 init,
                 idx: 0,
+                stack_slot: RefCell::new(None)
             });
             decls.push(d.clone());
             state.scopes.last_mut().unwrap().insert(name, d.clone());
@@ -466,7 +468,7 @@ fn parse_function(
     let (sloc, t) = lex.peeked.take().unwrap();
     assert!(t == Tok::LParen);
     assert!(state.local_decls.is_empty() && state.scopes.len() == 1);
-    let mut f = Function { name, sloc, retty, args: vec![], body: None, is_static, decls: vec![] };
+    let mut f = Function { name, sloc, retty, args: vec![], body: None, is_static, decls: vec![], ir: RefCell::new(Vec::new()) };
     lex.peeked.take();
     state.scopes.push(HashMap::new());
     if !lex.consume_if_next(Tok::RParen)? {
@@ -484,6 +486,7 @@ fn parse_function(
                 ty,
                 init: None,
                 idx: f.decls.len(),
+                stack_slot: RefCell::new(None)
             });
 
             state.scopes[1].insert(name, d.clone());
