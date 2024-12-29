@@ -26,7 +26,7 @@ pub enum OpC {
     Ret,
     Load { is_volatile: bool },
     Store { is_volatile: bool },
-    Const { signed: bool, bits: u8, val: i64 },
+    Const { val: i64 },
 }
 
 #[derive(Debug)]
@@ -72,8 +72,7 @@ impl std::fmt::Display for Inst {
             OpC::Br => write!(f, "br")?,
             OpC::Call => write!(f, "call")?,
             OpC::Ret => write!(f, "ret")?,
-            OpC::Const { signed: false, bits, val } => write!(f, "const {}u{}", val, bits)?,
-            OpC::Const { signed: true, bits, val } => write!(f, "const {}s{}", val, bits)?,
+            OpC::Const { val } => write!(f, "const {}", val)?,
             OpC::Load { is_volatile: _ } => write!(f, "load from")?,
             OpC::Store { is_volatile: _ } => write!(f, "store to")?,
         }
@@ -122,7 +121,7 @@ impl Inst {
         panic!("a or b not in their parent?!")
     }
 
-    pub fn add_operand(self: &Rc<Self>, op: &Rc<Self>) {
+    pub fn add_operand(self: &Rc<Self>, op: Rc<Self>) {
         let mut ops = self.ops.borrow_mut();
         let mut users = op.users.borrow_mut();
         users.push((ops.len(), self.clone()));
@@ -233,7 +232,7 @@ impl std::hash::Hash for Block {
 }
 
 impl Block {
-    pub fn new(bbs: &mut Vec<Rc<Block>>) -> Rc<Block> {
+    pub fn create_and_append(bbs: &mut Vec<Rc<Block>>) -> Rc<Block> {
         let idx = IDGEN.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
         let bb = Rc::new(Self {
             idx: Cell::new(idx),
@@ -254,7 +253,7 @@ impl Block {
         preds.push(self.clone());
     }
 
-    pub fn append(self: &Rc<Block>, inst: &Rc<Inst>) {
+    pub fn append(self: &Rc<Block>, inst: Rc<Inst>) {
         assert!(inst.block.borrow().upgrade().is_none());
         *inst.block.borrow_mut() = Rc::downgrade(self);
         self.instrs.borrow_mut().push(inst.clone());

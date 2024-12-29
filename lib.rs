@@ -11,6 +11,7 @@ use std::rc::Rc;
 pub mod ast;
 pub mod dce;
 pub mod ir;
+pub mod irgen;
 pub mod lex;
 pub mod parse;
 
