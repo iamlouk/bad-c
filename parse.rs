@@ -233,11 +233,54 @@ fn parse_stmt(state: &mut Unit, lex: &mut Lexer) -> Result<Stmt, Error> {
         return Ok(Stmt::Decls { sloc, decls })
     }
 
-    assert!(tok != Tok::If, "unimplemented: stmt starting with: {}", tok);
-    assert!(tok != Tok::For, "unimplemented: stmt starting with: {}", tok);
-    assert!(tok != Tok::While, "unimplemented: stmt starting with: {}", tok);
+    if tok == Tok::If {
+        lex.peeked.take();
+        lex.expect_tok(Tok::LParen, "expected '(' after 'if'")?;
+        let cond = parse_expr(state, lex)?;
+        lex.expect_tok(Tok::RParen, "expected ')' after cond. of 'if'")?;
+        let then = Box::new(parse_stmt(state, lex)?);
+        let otherwise = if lex.consume_if_next(Tok::Else)? {
+            Some(Box::new(parse_stmt(state, lex)?))
+        } else {
+            None
+        };
+        return Ok(Stmt::If { sloc, cond, then, otherwise })
+    }
 
-    Ok(Stmt::Expr { sloc, expr: parse_expr(state, lex)? })
+    if tok == Tok::While {
+        lex.peeked.take();
+        lex.expect_tok(Tok::LParen, "expected '(' after 'while'")?;
+        let cond = parse_expr(state, lex)?;
+        lex.expect_tok(Tok::RParen, "expected ')' after cond. of 'while'")?;
+        let body = Box::new(parse_stmt(state, lex)?);
+        return Ok(Stmt::While { sloc, cond, body })
+    }
+
+    if tok == Tok::For {
+        lex.peeked.take();
+        lex.expect_tok(Tok::LParen, "expected '(' after 'for'")?;
+        let init = Box::new(parse_stmt(state, lex)?);
+        let cond = parse_expr(state, lex)?;
+        lex.expect_tok(Tok::SemiColon, "expected a ';'")?;
+        let incr = parse_expr(state, lex)?;
+        lex.expect_tok(Tok::RParen, "expected ')' after incr. of 'for'")?;
+        let body = Box::new(parse_stmt(state, lex)?);
+        return Ok(Stmt::For { sloc, init, cond, incr, body })
+    }
+
+    if tok == Tok::Return {
+        lex.peeked.take();
+        if lex.consume_if_next(Tok::SemiColon)? {
+            return Ok(Stmt::Ret { sloc, val: None })
+        }
+        let expr = parse_expr(state, lex)?;
+        lex.expect_tok(Tok::SemiColon, "expected semicolon to end return statement")?;
+        return Ok(Stmt::Ret { sloc, val: Some(expr) })
+    }
+
+    let expr = parse_expr(state, lex)?;
+    lex.expect_tok(Tok::SemiColon, "expected semicolon to end expr. statement")?;
+    Ok(Stmt::Expr { sloc, expr })
 }
 
 fn parse_expr(state: &mut Unit, lex: &mut Lexer) -> Result<Box<Expr>, Error> {
@@ -401,18 +444,13 @@ fn parse_final_expr(state: &mut Unit, lex: &mut Lexer) -> Result<Box<Expr>, Erro
                 }
                 let typ = match expr.get_typ() {
                     Type::Ptr { ety, .. } => (*ety).clone(),
+                    Type::Array { ety, .. } => (*ety).clone(),
                     t => return Err(Error::Type(sloc, t, "expected a pointer")),
                 };
                 Box::new(Expr::Deref {
                     sloc: sloc.clone(),
                     typ,
-                    ptr: Box::new(Expr::BinOp {
-                        sloc,
-                        typ: expr.get_typ(),
-                        op: BinOp::Add,
-                        lhs: expr,
-                        rhs: offset,
-                    }),
+                    ptr: Box::new(Expr::PtrAdd { sloc, pty: expr.get_typ(), ptr: expr, offset }),
                 })
             }
             Tok::LParen => {
@@ -467,17 +505,19 @@ fn parse_function(
 ) -> Result<Rc<Function>, Error> {
     let (sloc, t) = lex.peeked.take().unwrap();
     assert!(t == Tok::LParen);
-    assert!(state.local_decls.is_empty() && state.scopes.len() == 1);
+    state.local_decls.clear();
+    assert!(state.scopes.len() == 1);
     let mut f = Function {
-        name,
-        sloc,
-        retty,
+        name: name.clone(),
+        sloc: sloc.clone(),
+        retty: retty.clone(),
         args: vec![],
         body: None,
         is_static,
         decls: vec![],
         ir: RefCell::new(Vec::new()),
     };
+
     lex.peeked.take();
     state.scopes.push(HashMap::new());
     if !lex.consume_if_next(Tok::RParen)? {
@@ -507,6 +547,18 @@ fn parse_function(
             break;
         }
     }
+
+    let fdecl = Rc::new(Decl {
+        sloc,
+        is_argument: false,
+        is_local: false,
+        name: name.clone(),
+        ty: Type::Fn { retty: Rc::new(retty), argtys: Rc::new(f.args.clone()) },
+        init: None,
+        idx: 0,
+        stack_slot: RefCell::new(None),
+    });
+    state.scopes[0].insert(name, fdecl);
 
     if lex.consume_if_next(Tok::SemiColon)? {
         state.scopes.pop();
@@ -551,27 +603,22 @@ mod tests {
         );
     }
 
+    fn unparse_test(input_file: &str, expected_output_file: &str) {
+        let mut d = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        d.push("tests");
+
+        let input_file = d.join(input_file);
+        let expected_output_file = d.join(expected_output_file);
+
+        let input = std::fs::read_to_string(input_file).unwrap();
+        let expected_output = std::fs::read_to_string(expected_output_file).unwrap();
+
+        let output = unparse(&input);
+        assert_eq!(expected_output, output);
+    }
+
     #[test]
-    fn single_bb() {
-        let s = unparse(
-            "void foo(int x, int y, int z, int *a, int *b) {
-                int tmp1, tmp2;
-                tmp1 = x + y;
-                tmp2 = tmp1 * (z - tmp1);
-                *a = b[tmp2 * z];
-                tmp2 = *b * (a[x] - z);
-                b[42] = tmp2;
-            }",
-        );
-        assert_eq!(
-            s,
-            "extern void foo(int x, int y, int z, int *a, int *b)\n   {\n    \
-             int tmp1;\n    int tmp2;\n    \
-             (tmp1) = ((x) + (y));\n    \
-             (tmp2) = ((tmp1) * ((z) - (tmp1)));\n    \
-             (*(a)) = (*((b) + ((tmp2) * (z))));\n    \
-             (tmp2) = ((*(b)) * ((*((a) + (x))) - (z)));\n    \
-             (*((b) + (0x2a))) = (tmp2);\n   }\n\n"
-        );
+    fn unparse_fibs() {
+        unparse_test("fibs.c", "fibs.unparsed.c");
     }
 }

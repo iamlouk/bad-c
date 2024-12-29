@@ -20,3 +20,8 @@ doctest = false
 name = "cpp"
 path = "bin/cpp.rs"
 test = false
+
+[[bin]]
+name = "cunparse"
+path = "bin/cunparse.rs"
+test = false

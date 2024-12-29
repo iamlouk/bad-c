@@ -446,7 +446,13 @@ impl Expr {
     fn write(&self, f: &mut dyn std::fmt::Write) -> std::fmt::Result {
         match self {
             Expr::Id { name, .. } => write!(f, "{}", name),
-            Expr::IntLit { num, .. } => write!(f, "{:#x}", num),
+            Expr::IntLit { num, typ, .. } => match typ {
+                Type::Int { bits: 32, signed: true } => write!(f, "{:#x}", num),
+                Type::Int { bits: 32, signed: false } => write!(f, "{:#x}u", num),
+                Type::Int { bits: 64, signed: true } => write!(f, "{:#x}l", num),
+                Type::Int { bits: 64, signed: false } => write!(f, "{:#x}ul", num),
+                _ => todo!(),
+            },
             Expr::Assign { op: Some(op), lhs, rhs, .. } => {
                 f.write_char('(')?;
                 lhs.write(f)?;
@@ -501,6 +507,7 @@ impl Expr {
                 if !func.is_id() {
                     f.write_char(')')?;
                 }
+                f.write_char('(')?;
                 for (i, arg) in args.iter().enumerate() {
                     f.write_str(if i == 0 { "" } else { ", " })?;
                     arg.write(f)?;
