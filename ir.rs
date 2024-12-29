@@ -3,9 +3,12 @@ use crate::{
     SLoc,
 };
 use bit_set::BitSet;
-use std::cell::{Cell, RefCell};
 use std::fmt::Write;
 use std::rc::{Rc, Weak};
+use std::{
+    cell::{Cell, RefCell},
+    collections::VecDeque,
+};
 
 static IDGEN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
@@ -29,13 +32,26 @@ pub enum OpC {
 #[derive(Debug)]
 pub struct Inst {
     idx: Cell<usize>,
+    visited: Cell<bool>,
     block: RefCell<Weak<Block>>,
-    users: RefCell<Vec<(usize, Rc<Inst>)>>,
-    ops: RefCell<Vec<Rc<Inst>>>,
+    pub users: RefCell<Vec<(usize, Rc<Inst>)>>,
+    pub ops: RefCell<Vec<Rc<Inst>>>,
     ty: Type,
     reg: Cell<u64>,
     sloc: Option<SLoc>,
-    opc: OpC,
+    pub opc: OpC,
+}
+
+impl std::cmp::PartialEq for Inst {
+    fn eq(&self, other: &Self) -> bool {
+        std::ptr::eq(self as *const _, other as *const _)
+    }
+}
+
+impl std::hash::Hash for Inst {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        state.write_usize(self as *const _ as usize);
+    }
 }
 
 impl std::fmt::Display for Inst {
@@ -75,6 +91,7 @@ impl Inst {
         let idx = IDGEN.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
         Rc::new(Self {
             idx: Cell::new(idx),
+            visited: Cell::new(false),
             block: RefCell::new(Weak::new()),
             users: RefCell::new(Vec::new()),
             ops: RefCell::new(Vec::new()),
@@ -111,15 +128,67 @@ impl Inst {
         users.push((ops.len(), self.clone()));
         ops.push(op.clone());
     }
+
+    pub fn has_sideeffect(&self) -> bool {
+        match self.opc {
+            OpC::NOp
+            | OpC::Cast
+            | OpC::Phi
+            | OpC::Cmp { .. }
+            | OpC::BinOp { .. }
+            | OpC::Alloca { .. }
+            | OpC::Load { is_volatile: false }
+            | OpC::Global { .. }
+            | OpC::Const { .. } => false,
+            OpC::Load { is_volatile: true }
+            | OpC::Call
+            | OpC::Br
+            | OpC::Ret
+            | OpC::Store { .. } => true,
+        }
+    }
+
+    pub fn num_uses(&self) -> usize {
+        self.users.borrow().len()
+    }
+
+    pub fn does_not_escape(&self) -> bool {
+        assert!(matches!(self.opc, OpC::Alloca { .. }));
+        for (useidx, useop) in self.users.borrow().iter() {
+            assert!(&*useop.ops.borrow()[*useidx] == self);
+            match (&useop.opc, useidx) {
+                (OpC::Load { is_volatile: false }, 0) => continue,
+                (OpC::Store { is_volatile: false }, 0) => continue,
+                _ => return false,
+            }
+        }
+        true
+    }
+
+    pub fn drop_operands_and_unlink(&self) {
+        assert!(self.num_uses() == 0);
+        let mut ops = self.ops.borrow_mut();
+        for (idx, op) in ops.iter().enumerate() {
+            let mut users = op.users.borrow_mut();
+            let idx = users.iter().position(|(uidx, uop)| *uidx == idx && **uop == *self).unwrap();
+            users.remove(idx);
+        }
+        ops.clear();
+        let block = self.block.borrow().upgrade().unwrap();
+        let mut instrs = block.instrs.borrow_mut();
+        let idx = instrs.iter().position(|op| **op == *self).unwrap();
+        instrs.remove(idx);
+    }
 }
 
 #[derive(Debug)]
 pub struct Block {
     idx: Cell<usize>,
+    pub visited: Cell<bool>,
     doms: RefCell<BitSet>,
-    preds: RefCell<Vec<Rc<Block>>>,
-    succs: RefCell<Vec<Rc<Block>>>,
-    instrs: RefCell<Vec<Rc<Inst>>>,
+    pub preds: RefCell<Vec<Rc<Block>>>,
+    pub succs: RefCell<Vec<Rc<Block>>>,
+    pub instrs: RefCell<Vec<Rc<Inst>>>,
 }
 
 impl std::fmt::Display for Block {
@@ -151,11 +220,24 @@ impl std::fmt::Display for Block {
     }
 }
 
+impl std::cmp::PartialEq for Block {
+    fn eq(&self, other: &Self) -> bool {
+        std::ptr::eq(self as *const _, other as *const _)
+    }
+}
+
+impl std::hash::Hash for Block {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        state.write_usize(self as *const _ as usize);
+    }
+}
+
 impl Block {
     pub fn new(bbs: &mut Vec<Rc<Block>>) -> Rc<Block> {
         let idx = IDGEN.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
         let bb = Rc::new(Self {
             idx: Cell::new(idx),
+            visited: Cell::new(false),
             doms: RefCell::new(BitSet::new()),
             preds: RefCell::new(Vec::new()),
             succs: RefCell::new(Vec::new()),
@@ -182,6 +264,38 @@ impl Block {
     pub fn dominates(a: &Block, b: &Block) -> bool {
         let bdoms = b.doms.borrow();
         bdoms.contains(a.idx.get())
+    }
+
+    pub fn reorder_into_rpo(blocks: &mut Vec<Rc<Block>>) {
+        let entry = blocks[0].clone();
+        assert!(entry.preds.borrow().is_empty());
+        blocks.iter().for_each(|b| b.visited.set(false));
+
+        let mut rpo = VecDeque::new();
+        let mut worklist = vec![(entry, false)];
+        while let Some((b, done)) = worklist.pop() {
+            if done {
+                rpo.push_front(b);
+                continue;
+            }
+            if b.visited.get() {
+                continue;
+            }
+            b.visited.set(true);
+            worklist.push((b.clone(), true));
+            for succ in b.succs.borrow().iter().rev() {
+                worklist.push((succ.clone(), false));
+            }
+        }
+
+        #[allow(clippy::never_loop)]
+        for _ in blocks.iter().filter(|b| !rpo.contains(*b)) {
+            // TODO: Remove any successors, remove any instrs/uses
+            unimplemented!("unreachable BB");
+        }
+
+        blocks.clear();
+        rpo.into_iter().collect_into(blocks);
     }
 
     // Fixpoint alg. for calculating dominance.

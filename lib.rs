@@ -1,11 +1,15 @@
 #![feature(assert_matches)]
 #![feature(if_let_guard)]
+#![feature(iter_collect_into)]
 #![allow(dead_code)]
+// ir::Inst and ir::Block hash by address, but contain (Ref)Cells.
+#![allow(clippy::mutable_key_type)]
 
 use std::path::Path;
 use std::rc::Rc;
 
 pub mod ast;
+pub mod dce;
 pub mod ir;
 pub mod lex;
 pub mod parse;
