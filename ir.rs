@@ -1,5 +1,5 @@
 use crate::{
-    ast::{BinOp, Decl, Expr, Type},
+    ast::{BinOp, Decl, Expr, Function, Type},
     SLoc,
 };
 use bit_set::BitSet;
@@ -61,7 +61,9 @@ impl std::fmt::Display for Inst {
         }
         match &self.opc {
             OpC::NOp => write!(f, "nop")?,
-            OpC::Alloca { decl } => write!(f, "alloca {}", decl.ty)?,
+            OpC::Alloca { decl } => {
+                write!(f, "alloca {} (name={:?})", decl.ty, decl.name.as_ref())?
+            }
             OpC::Global { decl } => write!(f, "global {}", decl.ty)?,
             OpC::Phi => write!(f, "phi")?,
             OpC::BinOp { signed: true, op } => write!(f, "{}s", Expr::binop_to_str(*op))?,
@@ -77,8 +79,10 @@ impl std::fmt::Display for Inst {
             OpC::Store { is_volatile: _ } => write!(f, "store to")?,
         }
         let ops = self.ops.borrow();
-        for op in ops.iter() {
-            f.write_str(", ")?;
+        for (i, op) in ops.iter().enumerate() {
+            if i != 0 {
+                f.write_char(',')?;
+            }
             write!(f, " %{}", op.idx.get())?;
         }
         Ok(())
@@ -253,6 +257,15 @@ impl Block {
         preds.push(self.clone());
     }
 
+    pub fn disconnect(self: &Rc<Block>, succ: &Rc<Block>) {
+        let mut succs = self.succs.borrow_mut();
+        let mut preds = succ.preds.borrow_mut();
+        let succidx = succs.iter().position(|s| s == succ).unwrap();
+        let predidx = preds.iter().position(|p| p == self).unwrap();
+        succs.remove(succidx);
+        preds.remove(predidx);
+    }
+
     pub fn append(self: &Rc<Block>, inst: Rc<Inst>) {
         assert!(inst.block.borrow().upgrade().is_none());
         *inst.block.borrow_mut() = Rc::downgrade(self);
@@ -282,15 +295,21 @@ impl Block {
             }
             b.visited.set(true);
             worklist.push((b.clone(), true));
-            for succ in b.succs.borrow().iter().rev() {
+            for succ in b.succs.borrow().iter() {
                 worklist.push((succ.clone(), false));
             }
         }
 
         #[allow(clippy::never_loop)]
-        for _ in blocks.iter().filter(|b| !rpo.contains(*b)) {
-            // TODO: Remove any successors, remove any instrs/uses
-            unimplemented!("unreachable BB");
+        for b in blocks.iter().filter(|b| !rpo.contains(*b)) {
+            let succs = b.succs.borrow().clone();
+            for succ in succs {
+                b.disconnect(&succ);
+            }
+            let instrs = b.instrs.borrow().clone();
+            for i in instrs.iter().rev() {
+                i.drop_operands_and_unlink();
+            }
         }
 
         blocks.clear();
@@ -312,6 +331,7 @@ impl Block {
                 doms.insert(i);
             }
         }
+        drop(doms);
 
         let mut change = true;
         let mut dset = BitSet::new();
@@ -373,5 +393,20 @@ impl Block {
                 }
             }
         }
+    }
+}
+
+impl Function {
+    pub fn write_ir(&self, w: &mut dyn std::fmt::Write) -> std::fmt::Result {
+        write!(w, "function {}(", self.name.as_ref())?;
+        for (i, (name, ty)) in self.args.iter().enumerate() {
+            write!(w, "{}{}: {}", if i == 0 { "" } else { ", " }, name.as_ref(), ty)?;
+        }
+        write!(w, ") -> {} {{\n", self.retty)?;
+        let bbs = self.ir.borrow();
+        for bb in bbs.iter() {
+            write!(w, "{}\n", bb)?;
+        }
+        w.write_str("}\n\n")
     }
 }

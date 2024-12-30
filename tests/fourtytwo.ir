@@ -1,0 +1,30 @@
+function fourtytwo_v1(unused: s32) -> u32 {
+.bb0:
+	; preds=[ ], doms=[ .bb0 ]
+	%3:u32 = const 42
+	ret %3
+	; succs=[ ]
+
+}
+
+function fourtytwo_v2() -> u32 {
+.bb0:
+	; preds=[ ], doms=[ .bb0 ]
+	%6:bool = const 1
+	br %6
+	; succs=[ .bb1 .bb2 ]
+
+.bb1:
+	; preds=[ .bb0 ], doms=[ .bb0 .bb1 ]
+	%10:s32 = const 42
+	ret %10
+	; succs=[ ]
+
+.bb2:
+	; preds=[ .bb0 ], doms=[ .bb0 .bb2 ]
+	%16:u32 = const 100
+	ret %16
+	; succs=[ ]
+
+}
+

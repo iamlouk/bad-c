@@ -39,7 +39,7 @@ impl Inst {
     }
 }
 
-fn run(bbs: &[Rc<Block>]) -> usize {
+pub fn run(bbs: &[Rc<Block>]) -> usize {
     let mut worklist = Vec::new();
     for bb in bbs {
         for inst in bb.instrs.borrow().iter() {

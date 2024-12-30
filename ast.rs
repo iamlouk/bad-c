@@ -565,4 +565,11 @@ impl Unit {
         }
         Ok(())
     }
+
+    pub fn functions_iter(&self) -> impl Iterator<Item = Rc<Function>> + use<'_> {
+        self.entries.iter().filter_map(|e| match e {
+            Entry::Function { f } => Some(f.clone()),
+            _ => None,
+        })
+    }
 }
