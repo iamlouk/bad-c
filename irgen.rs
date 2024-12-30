@@ -103,7 +103,40 @@ fn gen_ir_expr(cbb: Rc<Block>, expr: &Expr) -> Rc<Inst> {
             cbb.append(i.clone());
             i
         }
-        _ => unimplemented!("expr: {:?}", expr),
+        Expr::Id { sloc, typ, decl, .. } => {
+            let alloca = decl.stack_slot.borrow().as_ref().unwrap().clone();
+            let i = Inst::new(typ.clone(), OpC::Load { is_volatile: false }, Some(sloc.clone()));
+            i.add_operand(alloca);
+            cbb.append(i.clone());
+            i
+        }
+        Expr::BinOp { sloc, typ, op, lhs, rhs } => {
+            let lhs = gen_ir_expr(cbb.clone(), lhs.as_ref());
+            let rhs = gen_ir_expr(cbb.clone(), rhs.as_ref());
+            let i = Inst::new(
+                typ.clone(),
+                OpC::BinOp { signed: typ.is_signed(), op: *op },
+                Some(sloc.clone()),
+            );
+            i.add_operand(lhs);
+            i.add_operand(rhs);
+            cbb.append(i.clone());
+            i
+        }
+        Expr::Assign { sloc, op: None, lhs, rhs, .. } => match lhs.as_ref() {
+            Expr::Id { decl, .. } => {
+                let alloca = decl.stack_slot.borrow().as_ref().unwrap().clone();
+                let rhs = gen_ir_expr(cbb.clone(), rhs.as_ref());
+                let i =
+                    Inst::new(Type::Void, OpC::Store { is_volatile: false }, Some(sloc.clone()));
+                i.add_operand(alloca);
+                i.add_operand(rhs);
+                cbb.append(i.clone());
+                i
+            }
+            _ => unimplemented!(),
+        },
+        _ => unimplemented!(),
     }
 }
 

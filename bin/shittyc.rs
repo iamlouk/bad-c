@@ -67,7 +67,7 @@ fn main() {
         }))
         .expect("Tok::dump error");
         use std::io::Write;
-        output_file.write(s.as_bytes()).expect("I/O error");
+        output_file.write_all(s.as_bytes()).expect("I/O error");
         output_file.flush().expect("I/O error");
         return
     }
@@ -81,7 +81,7 @@ fn main() {
     let mut s = String::new();
     if args.unparse {
         cu.write(&mut s).expect("internal dump error");
-        output_file.write(s.as_bytes()).expect("I/O error");
+        output_file.write_all(s.as_bytes()).expect("I/O error");
         output_file.flush().expect("I/O error");
         return
     }
@@ -98,7 +98,7 @@ fn main() {
         for f in cu.functions_iter() {
             f.write_ir(&mut s).expect("internal dump error");
         }
-        output_file.write(s.as_bytes()).expect("I/O error");
+        output_file.write_all(s.as_bytes()).expect("I/O error");
         output_file.flush().expect("I/O error");
         return
     }

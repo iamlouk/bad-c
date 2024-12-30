@@ -22,10 +22,17 @@ fn ir_test(input_file: &str, expected_file: &str, passes: &[&str]) {
     }
 
     let expected = std::fs::read_to_string(&expected_file).expect("I/O error");
+    eprintln!("; result:\n{}", &irdump);
+    eprintln!("; expected:\n{}", &expected);
     assert_eq!(expected, irdump);
 }
 
 #[test]
 fn fourtytwo() {
     ir_test("tests/fourtytwo.c", "tests/fourtytwo.ir", &["dce"]);
+}
+
+#[test]
+fn add() {
+    ir_test("tests/add.c", "tests/add.ir", &[]);
 }

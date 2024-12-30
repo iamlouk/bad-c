@@ -339,8 +339,6 @@ fn parse_binary_expr(state: &mut Unit, lex: &mut Lexer, min_prec: u64) -> Result
         let rhs = parse_binary_expr(state, lex, prec + 1)?;
         let t = lhs.get_typ();
         if t != rhs.get_typ() {
-            eprintln!("lhs: {:?}", &lhs);
-            eprintln!("rhs: {:?}", &rhs);
             return Err(Error::Type(sloc, t, "different types on sides of boolean expr."))
         }
         if (op == BinOp::LogicalOr || op == BinOp::LogicalAnd) && !t.is_bool() {

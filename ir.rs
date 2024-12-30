@@ -12,7 +12,6 @@ use std::{
 
 static IDGEN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
-#[derive(Debug)]
 pub enum OpC {
     NOp,
     Alloca { decl: Rc<Decl> },
@@ -29,7 +28,6 @@ pub enum OpC {
     Const { val: i64 },
 }
 
-#[derive(Debug)]
 pub struct Inst {
     idx: Cell<usize>,
     visited: Cell<bool>,
@@ -61,9 +59,13 @@ impl std::fmt::Display for Inst {
         }
         match &self.opc {
             OpC::NOp => write!(f, "nop")?,
-            OpC::Alloca { decl } => {
-                write!(f, "alloca {} (name={:?})", decl.ty, decl.name.as_ref())?
-            }
+            OpC::Alloca { decl } => write!(
+                f,
+                "alloca {} (name={:?}, is_arg={})",
+                decl.ty,
+                decl.name.as_ref(),
+                decl.is_argument
+            )?,
             OpC::Global { decl } => write!(f, "global {}", decl.ty)?,
             OpC::Phi => write!(f, "phi")?,
             OpC::BinOp { signed: true, op } => write!(f, "{}s", Expr::binop_to_str(*op))?,
@@ -184,7 +186,6 @@ impl Inst {
     }
 }
 
-#[derive(Debug)]
 pub struct Block {
     idx: Cell<usize>,
     pub visited: Cell<bool>,
@@ -314,6 +315,16 @@ impl Block {
 
         blocks.clear();
         rpo.into_iter().collect_into(blocks);
+
+        let mut idx = 0;
+        for b in blocks.iter() {
+            let instrs = b.instrs.borrow();
+            idx += 1;
+            for i in instrs.iter() {
+                i.idx.set(idx);
+                idx += 1;
+            }
+        }
     }
 
     // Fixpoint alg. for calculating dominance.
@@ -402,10 +413,10 @@ impl Function {
         for (i, (name, ty)) in self.args.iter().enumerate() {
             write!(w, "{}{}: {}", if i == 0 { "" } else { ", " }, name.as_ref(), ty)?;
         }
-        write!(w, ") -> {} {{\n", self.retty)?;
+        writeln!(w, ") -> {} {{", self.retty)?;
         let bbs = self.ir.borrow();
         for bb in bbs.iter() {
-            write!(w, "{}\n", bb)?;
+            writeln!(w, "{}", bb)?;
         }
         w.write_str("}\n\n")
     }
@@ -413,7 +424,7 @@ impl Function {
     pub fn opt(&self, passes: &[String]) -> Result<bool, String> {
         let mut bbs = self.ir.borrow_mut();
         Block::reorder_into_rpo(&mut bbs);
-        Block::recalc_doms_and_verify(&mut bbs);
+        Block::recalc_doms_and_verify(&bbs);
         let mut changed = false;
         for pass in passes {
             use crate::dce;
@@ -423,7 +434,7 @@ impl Function {
             }
         }
         Block::reorder_into_rpo(&mut bbs);
-        Block::recalc_doms_and_verify(&mut bbs);
+        Block::recalc_doms_and_verify(&bbs);
         Ok(changed)
     }
 }

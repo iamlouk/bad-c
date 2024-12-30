@@ -30,6 +30,12 @@ impl Type {
     pub fn is_pointer(&self) -> bool {
         matches!(self, Self::Ptr { .. })
     }
+    pub fn is_signed(&self) -> bool {
+        match self {
+            Type::Int { bits: _, signed } => *signed,
+            _ => panic!("not a integer"),
+        }
+    }
 
     pub fn ety(&self) -> Rc<Type> {
         match self {
@@ -199,7 +205,7 @@ impl std::fmt::Display for Type {
 }
 
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Function {
     pub name: Rc<str>,
     pub sloc: SLoc,
@@ -234,7 +240,6 @@ impl Function {
 }
 
 #[allow(dead_code)]
-#[derive(Debug)]
 pub struct Decl {
     pub sloc: SLoc,
     pub is_argument: bool,
@@ -247,7 +252,7 @@ pub struct Decl {
 }
 
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub enum Stmt {
     NoOp { sloc: SLoc },
     Expr { sloc: SLoc, expr: Box<Expr> },
@@ -343,7 +348,7 @@ impl Stmt {
 }
 
 #[allow(dead_code)]
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq)]
 pub enum BinOp {
     EQ,
     NE,
@@ -364,7 +369,7 @@ pub enum BinOp {
 }
 
 #[allow(dead_code)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy)]
 pub enum UnaryOp {
     Neg,
     LogicalNot,
@@ -372,7 +377,7 @@ pub enum UnaryOp {
 }
 
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub enum Expr {
     Id { sloc: SLoc, typ: Type, name: Rc<str>, decl: Rc<Decl> },
     IntLit { sloc: SLoc, typ: Type, num: i64 },
@@ -529,7 +534,6 @@ impl Expr {
     }
 }
 
-#[derive(Debug)]
 pub enum Entry {
     Structdef { sloc: SLoc, name: Rc<str>, ty: Type },
     Typedef { sloc: SLoc, name: Rc<str>, ty: Type },
@@ -537,7 +541,7 @@ pub enum Entry {
     Function { f: Rc<Function> },
 }
 
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct Unit {
     pub types: HashMap<Rc<str>, Type>,
     pub typedefs: HashMap<Rc<str>, Type>,
