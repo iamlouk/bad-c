@@ -409,4 +409,21 @@ impl Function {
         }
         w.write_str("}\n\n")
     }
+
+    pub fn opt(&self, passes: &[String]) -> Result<bool, String> {
+        let mut bbs = self.ir.borrow_mut();
+        Block::reorder_into_rpo(&mut bbs);
+        Block::recalc_doms_and_verify(&mut bbs);
+        let mut changed = false;
+        for pass in passes {
+            use crate::dce;
+            match pass.as_str() {
+                "dce" => changed |= dce::run(&bbs) > 0,
+                _ => return Err(format!("unknown pass: {:?}", *pass)),
+            }
+        }
+        Block::reorder_into_rpo(&mut bbs);
+        Block::recalc_doms_and_verify(&mut bbs);
+        Ok(changed)
+    }
 }

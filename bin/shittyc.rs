@@ -2,7 +2,6 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::str::FromStr;
 
-use ast::Function;
 use shittyc::*;
 
 use clap::Parser;
@@ -27,15 +26,9 @@ struct Args {
 
     #[arg(short, long, action)]
     emitir: bool,
-}
 
-fn opt(f: &Function) {
-    let mut bbs = f.ir.borrow_mut();
-    ir::Block::reorder_into_rpo(&mut bbs);
-    ir::Block::recalc_doms_and_verify(&mut bbs);
-    dce::run(&bbs);
-    ir::Block::reorder_into_rpo(&mut bbs);
-    ir::Block::recalc_doms_and_verify(&mut bbs);
+    #[arg(short, long)]
+    passes: Vec<String>,
 }
 
 fn main() {
@@ -95,7 +88,10 @@ fn main() {
 
     for f in cu.functions_iter() {
         f.gen_ir();
-        opt(&*f);
+        if let Err(e) = f.opt(&args.passes) {
+            eprintln!("opt. error: {:?}", e);
+            std::process::exit(1);
+        }
     }
 
     if args.emitir {

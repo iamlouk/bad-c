@@ -22,5 +22,5 @@ doctest = false
 [[bin]]
 name = "shittyc"
 path = "./bin/shittyc.rs"
-test = true
+test = false
 doctest = false
