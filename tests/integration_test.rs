@@ -36,3 +36,8 @@ fn fourtytwo() {
 fn add() {
     ir_test("tests/add.c", "tests/add.ir", &[]);
 }
+
+#[test]
+fn mem2reg() {
+    ir_test("tests/mem2reg.c", "tests/mem2reg.ir", &["mem2reg", "dce"]);
+}

@@ -1,12 +1,12 @@
 function add(a: s32, b: s32) -> s32 {
 .bb0:
 	; preds=[ ], doms=[ .bb0 ]
-	%1:s32 = alloca s32 (name="a", is_arg=true)
-	%2:s32 = alloca s32 (name="b", is_arg=true)
-	%3:s32 = load from %1
-	%4:s32 = load from %2
-	%5:s32 = +s %3, %4
-	ret %5
+	%1:*s32 = alloca s32 (name="a", is_arg=true)
+	%2:*s32 = alloca s32 (name="b", is_arg=true)
+	%3:s32 = load from %1:*s32
+	%4:s32 = load from %2:*s32
+	%5:s32 = %3:s32 + %4:s32
+	ret %5:s32
 	; succs=[ ]
 
 }

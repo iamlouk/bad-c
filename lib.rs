@@ -13,6 +13,7 @@ pub mod dce;
 pub mod ir;
 pub mod irgen;
 pub mod lex;
+pub mod mem2reg;
 pub mod parse;
 
 #[derive(Clone, PartialEq, PartialOrd, Debug)]

@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::{collections::HashSet, rc::Rc};
 
 use crate::ir::*;
 
@@ -27,9 +27,6 @@ impl Inst {
         // TODO: Do this complicated stuff...
         // Meanwhile: Just check if there is no load at all.
         for (_, user) in ptr.users.borrow().iter() {
-            if **user == *self {
-                continue;
-            }
             if matches!(user.opc, OpC::Store { is_volatile: false }) {
                 continue;
             }
@@ -40,26 +37,47 @@ impl Inst {
 }
 
 pub fn run(bbs: &[Rc<Block>]) -> usize {
-    let mut worklist = Vec::new();
+    let mut deleted = 0;
+
+    let mut worklistset = HashSet::new();
     for bb in bbs {
         for inst in bb.instrs.borrow().iter() {
             if (!inst.has_sideeffect() && inst.num_uses() == 0) || inst.is_dead_store() {
-                worklist.push(inst.clone());
+                worklistset.insert(inst.clone());
             }
         }
     }
 
-    let mut deleted = 0;
-    while let Some(inst) = worklist.pop() {
-        assert!(inst.num_uses() == 0 && !(inst.has_sideeffect() || inst.is_dead_store()));
-        for op in inst.ops.borrow().iter() {
-            assert!(op.num_uses() >= 1);
-            if !op.has_sideeffect() && op.num_uses() == 1 {
-                worklist.push(op.clone());
+    let mut worklist = Vec::new();
+    for iter in 0.. {
+        eprintln!("dce: iter={}, worklist-size={}", iter, worklistset.len());
+        worklist.clear();
+        worklistset.iter().map(Rc::clone).collect_into(&mut worklist);
+        if worklist.is_empty() {
+            break;
+        }
+
+        worklistset.clear();
+        for i in worklist.iter() {
+            assert!(i.num_uses() == 0 && (!i.has_sideeffect() || i.is_dead_store()));
+            let ops = i.ops.borrow().clone();
+            deleted += 1;
+            eprintln!("dce: {}", i);
+            worklistset.remove(i);
+            i.drop_operands_and_unlink();
+            for op in ops {
+                if (!op.has_sideeffect() && op.num_uses() == 0) || op.is_dead_store() {
+                    worklistset.insert(op.clone());
+                } else if op.is_alloca() {
+                    for (_, user) in op.users.borrow().iter() {
+                        if (!user.has_sideeffect() && user.num_uses() == 0) || user.is_dead_store()
+                        {
+                            worklistset.insert(user.clone());
+                        }
+                    }
+                }
             }
         }
-        deleted += 1;
-        inst.drop_operands_and_unlink();
     }
 
     deleted

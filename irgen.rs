@@ -57,6 +57,7 @@ fn gen_ir_stmt(cbb: Rc<Block>, stmt: &Stmt, bbs: &mut Vec<Rc<Block>>) -> Rc<Bloc
 
             let joinbb = Block::create_and_append(bbs);
             Block::connect(&cbb, &thenentrybb);
+            Block::connect(&thenexitbb, &joinbb);
             if let Some(otherwise) = otherwise {
                 let elsebb = Block::create_and_append(bbs);
                 Block::connect(&cbb, &elsebb);
@@ -64,11 +65,31 @@ fn gen_ir_stmt(cbb: Rc<Block>, stmt: &Stmt, bbs: &mut Vec<Rc<Block>>) -> Rc<Bloc
                 Block::connect(&elsebb, &joinbb);
             } else {
                 Block::connect(&cbb, &joinbb);
-                Block::connect(&thenexitbb, &joinbb);
             }
             joinbb
         }
-        Stmt::While { .. } => unimplemented!(),
+        Stmt::While { sloc, cond, body } => {
+            let br = Inst::new(Type::Void, OpC::Br, Some(sloc.clone()));
+            cbb.append(br);
+
+            let condbb = Block::create_and_append(bbs);
+            let cond = gen_ir_expr(condbb.clone(), cond.as_ref());
+            let cbr = Inst::new(Type::Void, OpC::Br, Some(sloc.clone()));
+            cbr.add_operand(cond);
+            condbb.append(cbr);
+
+            let loopentrybb = Block::create_and_append(bbs);
+            let loopexitbb = gen_ir_stmt(loopentrybb.clone(), body.as_ref(), bbs);
+            let br = Inst::new(Type::Void, OpC::Br, Some(sloc.clone()));
+            loopexitbb.append(br);
+
+            let joinbb = Block::create_and_append(bbs);
+            Block::connect(&cbb, &condbb);
+            Block::connect(&condbb, &loopentrybb);
+            Block::connect(&condbb, &joinbb);
+            Block::connect(&loopexitbb, &condbb);
+            joinbb
+        }
         Stmt::For { sloc, init, cond, incr, body } => {
             let cbb = gen_ir_stmt(cbb, init.as_ref(), bbs);
             let br = Inst::new(Type::Void, OpC::Br, Some(sloc.clone()));
@@ -113,15 +134,36 @@ fn gen_ir_expr(cbb: Rc<Block>, expr: &Expr) -> Rc<Inst> {
         Expr::BinOp { sloc, typ, op, lhs, rhs } => {
             let lhs = gen_ir_expr(cbb.clone(), lhs.as_ref());
             let rhs = gen_ir_expr(cbb.clone(), rhs.as_ref());
+            assert_eq!(lhs.ty, rhs.ty);
+            let signed = lhs.ty.is_signed();
             let i = Inst::new(
                 typ.clone(),
-                OpC::BinOp { signed: typ.is_signed(), op: *op },
+                if Expr::is_cmp(*op) {
+                    OpC::Cmp { signed, op: *op }
+                } else {
+                    OpC::BinOp { signed, op: *op }
+                },
                 Some(sloc.clone()),
             );
             i.add_operand(lhs);
             i.add_operand(rhs);
             cbb.append(i.clone());
             i
+        }
+        Expr::UnaryOp { sloc, typ, op: UnaryOp::Neg, val } => {
+            assert!(typ.is_numerical());
+            let val = gen_ir_expr(cbb.clone(), val.as_ref());
+            let zero = Inst::new(typ.clone(), OpC::Const { val: 0 }, Some(sloc.clone()));
+            cbb.append(zero.clone());
+            let sub = Inst::new(
+                typ.clone(),
+                OpC::BinOp { signed: typ.is_signed(), op: BinOp::Sub },
+                Some(sloc.clone()),
+            );
+            sub.add_operand(zero);
+            sub.add_operand(val);
+            cbb.append(sub.clone());
+            sub
         }
         Expr::Assign { sloc, op: None, lhs, rhs, .. } => match lhs.as_ref() {
             Expr::Id { decl, .. } => {
@@ -131,6 +173,32 @@ fn gen_ir_expr(cbb: Rc<Block>, expr: &Expr) -> Rc<Inst> {
                     Inst::new(Type::Void, OpC::Store { is_volatile: false }, Some(sloc.clone()));
                 i.add_operand(alloca);
                 i.add_operand(rhs);
+                cbb.append(i.clone());
+                i
+            }
+            _ => unimplemented!(),
+        },
+        Expr::Assign { sloc, op: Some(binop), lhs, rhs, .. } => match lhs.as_ref() {
+            Expr::Id { decl, .. } => {
+                let alloca = decl.stack_slot.borrow().as_ref().unwrap().clone();
+                let lhs =
+                    Inst::new(lhs.get_typ(), OpC::Load { is_volatile: false }, Some(sloc.clone()));
+                lhs.add_operand(alloca.clone());
+                cbb.append(lhs.clone());
+                let rhs = gen_ir_expr(cbb.clone(), rhs.as_ref());
+                let binop = Inst::new(
+                    lhs.ty.clone(),
+                    OpC::BinOp { signed: lhs.ty.is_signed(), op: *binop },
+                    Some(sloc.clone()),
+                );
+                assert_eq!(lhs.ty, rhs.ty);
+                binop.add_operand(lhs);
+                binop.add_operand(rhs);
+                cbb.append(binop.clone());
+                let i =
+                    Inst::new(Type::Void, OpC::Store { is_volatile: false }, Some(sloc.clone()));
+                i.add_operand(alloca);
+                i.add_operand(binop);
                 cbb.append(i.clone());
                 i
             }
@@ -148,7 +216,7 @@ impl Function {
         let bb = Block::create_and_append(&mut bbs);
         for decl in self.decls.iter() {
             let i = Inst::new(
-                decl.ty.clone(),
+                Type::new_ptr(&decl.ty),
                 OpC::Alloca { decl: decl.clone() },
                 Some(decl.sloc.clone()),
             );

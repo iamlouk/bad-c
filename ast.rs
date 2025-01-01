@@ -21,6 +21,10 @@ pub enum Type {
 }
 
 impl Type {
+    pub fn new_ptr(ety: &Type) -> Type {
+        Type::Ptr { ety: Rc::new(ety.clone()), volatile: false, constant: false, restrict: false }
+    }
+
     pub fn is_bool(&self) -> bool {
         *self == Type::Bool
     }
@@ -32,8 +36,9 @@ impl Type {
     }
     pub fn is_signed(&self) -> bool {
         match self {
+            Type::Bool => false,
             Type::Int { bits: _, signed } => *signed,
-            _ => panic!("not a integer"),
+            _ => panic!("not a integer: {}", self),
         }
     }
 
@@ -199,6 +204,7 @@ impl std::fmt::Display for Type {
             Type::Bool => write!(f, "bool"),
             Type::Int { bits, signed: false } => write!(f, "u{}", bits),
             Type::Int { bits, signed: true } => write!(f, "s{}", bits),
+            Type::Ptr { ety, .. } => write!(f, "*{}", &**ety),
             _ => self.write("", f),
         }
     }

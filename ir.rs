@@ -26,15 +26,17 @@ pub enum OpC {
     Load { is_volatile: bool },
     Store { is_volatile: bool },
     Const { val: i64 },
+    Undef,
 }
 
 pub struct Inst {
-    idx: Cell<usize>,
+    pub idx: Cell<usize>,
     visited: Cell<bool>,
     block: RefCell<Weak<Block>>,
+    name: Option<Rc<str>>,
     pub users: RefCell<Vec<(usize, Rc<Inst>)>>,
     pub ops: RefCell<Vec<Rc<Inst>>>,
-    ty: Type,
+    pub ty: Type,
     reg: Cell<u64>,
     sloc: Option<SLoc>,
     pub opc: OpC,
@@ -45,6 +47,8 @@ impl std::cmp::PartialEq for Inst {
         std::ptr::eq(self as *const _, other as *const _)
     }
 }
+
+impl std::cmp::Eq for Inst {}
 
 impl std::hash::Hash for Inst {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
@@ -57,8 +61,10 @@ impl std::fmt::Display for Inst {
         if self.ty != Type::Void {
             write!(f, "%{}:{} = ", self.idx.get(), self.ty)?;
         }
+        let ops = self.ops.borrow();
         match &self.opc {
             OpC::NOp => write!(f, "nop")?,
+            OpC::Undef => write!(f, "undef")?,
             OpC::Alloca { decl } => write!(
                 f,
                 "alloca {} (name={:?}, is_arg={})",
@@ -68,10 +74,32 @@ impl std::fmt::Display for Inst {
             )?,
             OpC::Global { decl } => write!(f, "global {}", decl.ty)?,
             OpC::Phi => write!(f, "phi")?,
-            OpC::BinOp { signed: true, op } => write!(f, "{}s", Expr::binop_to_str(*op))?,
-            OpC::BinOp { signed: false, op } => write!(f, "{}u", Expr::binop_to_str(*op))?,
-            OpC::Cmp { signed: true, op } => write!(f, "cmps {}", Expr::binop_to_str(*op))?,
-            OpC::Cmp { signed: false, op } => write!(f, "cmpu {}", Expr::binop_to_str(*op))?,
+            OpC::BinOp { signed: _, op } => {
+                assert!(ops.len() == 2 && !Expr::is_cmp(*op));
+                write!(
+                    f,
+                    "%{}:{} {} %{}:{}",
+                    ops[0].idx.get(),
+                    &ops[0].ty,
+                    Expr::binop_to_str(*op),
+                    ops[1].idx.get(),
+                    &ops[0].ty
+                )?;
+                return Ok(())
+            }
+            OpC::Cmp { signed: _, op } => {
+                assert!(ops.len() == 2 && Expr::is_cmp(*op));
+                write!(
+                    f,
+                    "%{}:{} {} %{}:{}",
+                    ops[0].idx.get(),
+                    &ops[0].ty,
+                    Expr::binop_to_str(*op),
+                    ops[1].idx.get(),
+                    &ops[0].ty
+                )?;
+                return Ok(())
+            }
             OpC::Cast => write!(f, "cast to {}:", self.ty)?,
             OpC::Br => write!(f, "br")?,
             OpC::Call => write!(f, "call")?,
@@ -80,12 +108,11 @@ impl std::fmt::Display for Inst {
             OpC::Load { is_volatile: _ } => write!(f, "load from")?,
             OpC::Store { is_volatile: _ } => write!(f, "store to")?,
         }
-        let ops = self.ops.borrow();
         for (i, op) in ops.iter().enumerate() {
             if i != 0 {
                 f.write_char(',')?;
             }
-            write!(f, " %{}", op.idx.get())?;
+            write!(f, " %{}:{}", op.idx.get(), &op.ty)?;
         }
         Ok(())
     }
@@ -104,6 +131,7 @@ impl Inst {
             reg: Cell::new(u64::MAX),
             sloc,
             opc,
+            name: None,
         })
     }
 
@@ -137,6 +165,7 @@ impl Inst {
     pub fn has_sideeffect(&self) -> bool {
         match self.opc {
             OpC::NOp
+            | OpC::Undef
             | OpC::Cast
             | OpC::Phi
             | OpC::Cmp { .. }
@@ -184,12 +213,49 @@ impl Inst {
         let idx = instrs.iter().position(|op| **op == *self).unwrap();
         instrs.remove(idx);
     }
+
+    pub fn is_load(&self) -> bool {
+        matches!(self.opc, OpC::Load { .. })
+    }
+    pub fn is_store(&self) -> bool {
+        matches!(self.opc, OpC::Store { .. })
+    }
+    pub fn is_alloca(&self) -> bool {
+        matches!(self.opc, OpC::Alloca { .. })
+    }
+
+    pub fn get_block(&self) -> Rc<Block> {
+        let block = self.block.borrow();
+        block.upgrade().unwrap().clone()
+    }
+
+    pub fn get_operand(&self, idx: usize) -> Rc<Inst> {
+        self.ops.borrow()[idx].clone()
+    }
+
+    pub fn replace_all_uses_with(&self, newval: Rc<Inst>) {
+        assert_eq!(self.ty, newval.ty);
+        let mut uses = self.users.borrow_mut();
+        let mut newuses = newval.users.borrow_mut();
+        for (useidx, user) in uses.iter() {
+            user.ops.borrow_mut()[*useidx] = newval.clone();
+            newuses.push((*useidx, user.clone()));
+        }
+        uses.clear();
+    }
+
+    pub fn insert_before(self: &Rc<Inst>, inst: Rc<Inst>) {
+        let block = inst.get_block();
+        let idx = block.instrs.borrow().iter().position(|i| **i == *inst).unwrap();
+        block.insert(idx, self.clone());
+    }
 }
 
 pub struct Block {
-    idx: Cell<usize>,
+    pub idx: Cell<usize>,
+    pub idom: Cell<Option<usize>>,
     pub visited: Cell<bool>,
-    doms: RefCell<BitSet>,
+    pub doms: RefCell<BitSet>,
     pub preds: RefCell<Vec<Rc<Block>>>,
     pub succs: RefCell<Vec<Rc<Block>>>,
     pub instrs: RefCell<Vec<Rc<Inst>>>,
@@ -207,7 +273,11 @@ impl std::fmt::Display for Block {
         for idx in doms.iter() {
             write!(f, " .bb{}", idx)?;
         }
-        f.write_str(" ]\n")?;
+        if let Some(idom) = self.idom.get() {
+            writeln!(f, " ], idom=.bb{}", idom)?;
+        } else {
+            writeln!(f, " ]")?;
+        }
         let instrs = self.instrs.borrow();
         for inst in instrs.iter() {
             f.write_char('\t')?;
@@ -230,6 +300,8 @@ impl std::cmp::PartialEq for Block {
     }
 }
 
+impl std::cmp::Eq for Block {}
+
 impl std::hash::Hash for Block {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         state.write_usize(self as *const _ as usize);
@@ -241,6 +313,7 @@ impl Block {
         let idx = IDGEN.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
         let bb = Rc::new(Self {
             idx: Cell::new(idx),
+            idom: Cell::new(None),
             visited: Cell::new(false),
             doms: RefCell::new(BitSet::new()),
             preds: RefCell::new(Vec::new()),
@@ -271,6 +344,20 @@ impl Block {
         assert!(inst.block.borrow().upgrade().is_none());
         *inst.block.borrow_mut() = Rc::downgrade(self);
         self.instrs.borrow_mut().push(inst.clone());
+    }
+
+    pub fn insert(self: &Rc<Block>, idx: usize, inst: Rc<Inst>) {
+        assert!(inst.block.borrow().upgrade().is_none());
+        *inst.block.borrow_mut() = Rc::downgrade(self);
+        self.instrs.borrow_mut().insert(idx, inst.clone());
+    }
+
+    pub fn insert_before_terminator(self: &Rc<Block>, inst: Rc<Inst>) {
+        assert!(inst.block.borrow().upgrade().is_none());
+        *inst.block.borrow_mut() = Rc::downgrade(self);
+        let mut instrs = self.instrs.borrow_mut();
+        let pos = instrs.len() - 2;
+        instrs.insert(pos, inst);
     }
 
     // Return true if a dominates b.
@@ -316,10 +403,9 @@ impl Block {
         blocks.clear();
         rpo.into_iter().collect_into(blocks);
 
-        let mut idx = 0;
+        let mut idx = blocks.len();
         for b in blocks.iter() {
             let instrs = b.instrs.borrow();
-            idx += 1;
             for i in instrs.iter() {
                 i.idx.set(idx);
                 idx += 1;
@@ -331,11 +417,13 @@ impl Block {
     pub fn recalc_doms_and_verify(blocks: &[Rc<Block>]) {
         let entry = blocks[0].clone();
         entry.idx.set(0);
+        entry.idom.set(None);
         let mut doms = entry.doms.borrow_mut();
         doms.clear();
         doms.insert(0);
         for (i, b) in blocks.iter().enumerate().skip(1) {
             b.idx.set(i);
+            b.idom.set(None);
             let mut doms = b.doms.borrow_mut();
             doms.clear();
             for i in 0..blocks.len() {
@@ -350,7 +438,8 @@ impl Block {
             change = false;
             for b in blocks.iter().skip(1) {
                 dset.clone_from(&b.doms.borrow());
-                for pred in b.preds.borrow().iter() {
+                let preds = b.preds.borrow();
+                for pred in preds.iter() {
                     dset.intersect_with(&*pred.doms.borrow());
                 }
                 dset.insert(b.idx.get());
@@ -361,8 +450,18 @@ impl Block {
 
         // Some basic checks that the CFG is valid:
         for b in blocks {
-            let instrs = b.instrs.borrow();
             let preds = b.preds.borrow();
+            if b.idx.get() != 0 && preds.len() > 0 {
+                // BBs should always be in RPO order here, so simply selecting the BB common in all
+                // predecessor dom. sets with the highest idx should work?
+                let mut bs = preds[0].doms.borrow().clone();
+                for pred in preds.iter().skip(1) {
+                    bs.intersect_with(&pred.doms.borrow());
+                }
+                b.idom.set(bs.iter().last());
+            }
+
+            let instrs = b.instrs.borrow();
             let succs = b.succs.borrow();
             let len = instrs.len();
             for (i, inst) in instrs.iter().enumerate() {
@@ -428,8 +527,15 @@ impl Function {
         let mut changed = false;
         for pass in passes {
             use crate::dce;
+            use crate::mem2reg;
             match pass.as_str() {
                 "dce" => changed |= dce::run(&bbs) > 0,
+                "mem2reg" => {
+                    // mem2reg depends on the DT.
+                    Block::reorder_into_rpo(&mut bbs);
+                    Block::recalc_doms_and_verify(&bbs);
+                    changed |= mem2reg::run(&bbs)
+                }
                 _ => return Err(format!("unknown pass: {:?}", *pass)),
             }
         }

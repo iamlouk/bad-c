@@ -564,6 +564,7 @@ fn parse_function(
     }
 
     f.body = Some(Box::new(parse_stmt(state, lex)?));
+    f.decls.append(&mut state.local_decls);
     state.scopes.pop();
     Ok(Rc::new(f))
 }

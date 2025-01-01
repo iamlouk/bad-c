@@ -1,0 +1,117 @@
+function sign(n: s32) -> s32 {
+.bb0:
+	; preds=[ ], doms=[ .bb0 ]
+	%6:*s32 = alloca s32 (name="n", is_arg=true)
+	%7:s32 = const 0
+	%8:s32 = load from %6:*s32
+	%9:s32 = const 0
+	%10:bool = %8:s32 < %9:s32
+	br %10:bool
+	; succs=[ .bb1 .bb2 ]
+
+.bb1:
+	; preds=[ .bb0 ], doms=[ .bb0 .bb1 ], idom=.bb0
+	%12:s32 = const 1
+	%13:s32 = const 0
+	%14:s32 = %13:s32 - %12:s32
+	br
+	; succs=[ .bb5 ]
+
+.bb2:
+	; preds=[ .bb0 ], doms=[ .bb0 .bb2 ], idom=.bb0
+	%16:s32 = load from %6:*s32
+	%17:s32 = const 0
+	%18:bool = %16:s32 > %17:s32
+	br %18:bool
+	; succs=[ .bb3 .bb4 ]
+
+.bb3:
+	; preds=[ .bb2 ], doms=[ .bb0 .bb2 .bb3 ], idom=.bb2
+	%20:s32 = const 1
+	br
+	; succs=[ .bb4 ]
+
+.bb4:
+	; preds=[ .bb3 .bb2 ], doms=[ .bb0 .bb2 .bb4 ], idom=.bb2
+	%22:s32 = phi %20:s32, %7:s32
+	; succs=[ .bb5 ]
+
+.bb5:
+	; preds=[ .bb1 .bb4 ], doms=[ .bb0 .bb5 ], idom=.bb0
+	%23:s32 = phi %14:s32, %22:s32
+	ret %23:s32
+	; succs=[ ]
+
+}
+
+function bar() -> s32 {
+.bb0:
+	; preds=[ ], doms=[ .bb0 ]
+	%3:s32 = const 1
+	%4:s32 = const 2
+	%5:s32 = undef
+	%6:bool = %3:s32 == %4:s32
+	br %6:bool
+	; succs=[ .bb1 .bb2 ]
+
+.bb1:
+	; preds=[ .bb0 ], doms=[ .bb0 .bb1 ], idom=.bb0
+	%8:s32 = const 42
+	br
+	; succs=[ .bb2 ]
+
+.bb2:
+	; preds=[ .bb1 .bb0 ], doms=[ .bb0 .bb2 ], idom=.bb0
+	%10:s32 = phi %8:s32, %5:s32
+	ret %10:s32
+	; succs=[ ]
+
+}
+
+function foo() -> s32 {
+.bb0:
+	; preds=[ ], doms=[ .bb0 ]
+	%1:s32 = const 1
+	%2:s32 = const 2
+	%3:s32 = %1:s32 + %2:s32
+	%4:s32 = const 3
+	%5:s32 = %3:s32 + %4:s32
+	%6:s32 = %1:s32 + %3:s32
+	%7:s32 = %6:s32 + %5:s32
+	ret %7:s32
+	; succs=[ ]
+
+}
+
+function sum() -> s32 {
+.bb0:
+	; preds=[ ], doms=[ .bb0 ]
+	%4:s32 = const 1
+	%5:s32 = const 0
+	br
+	; succs=[ .bb1 ]
+
+.bb1:
+	; preds=[ .bb0 .bb2 ], doms=[ .bb0 .bb1 ], idom=.bb0
+	%7:s32 = phi %5:s32, %12:s32
+	%8:s32 = phi %4:s32, %14:s32
+	%9:s32 = const 100
+	%10:bool = %8:s32 < %9:s32
+	br %10:bool
+	; succs=[ .bb2 .bb3 ]
+
+.bb2:
+	; preds=[ .bb1 ], doms=[ .bb0 .bb1 .bb2 ], idom=.bb1
+	%12:s32 = %7:s32 + %8:s32
+	%13:s32 = const 1
+	%14:s32 = %8:s32 + %13:s32
+	br
+	; succs=[ .bb1 ]
+
+.bb3:
+	; preds=[ .bb1 ], doms=[ .bb0 .bb1 .bb3 ], idom=.bb1
+	ret %7:s32
+	; succs=[ ]
+
+}
+

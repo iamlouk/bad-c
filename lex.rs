@@ -964,6 +964,21 @@ impl Lexer {
             return self.directive_cond(defined);
         }
 
+        if dir.equal_to_str("if") {
+            self.expand = true;
+            match self.next()?.1 {
+                Tok::IntLit { val: 0, .. } => {
+                    self.expand = false;
+                    return self.directive_cond(false);
+                }
+                Tok::IntLit { .. } => {
+                    self.expand = false;
+                    return self.directive_cond(true);
+                }
+                _ => unimplemented!("directive: #if with non-int arg."),
+            }
+        }
+
         if dir.equal_to_str("ifndef") {
             let (_, id) = self.expect_id("expected a identifier after '#if<n>def'")?;
             let defined = self.state.macros[0].contains_key(id.as_ref());
