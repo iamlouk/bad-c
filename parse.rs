@@ -220,6 +220,7 @@ fn parse_stmt(state: &mut Unit, lex: &mut Lexer) -> Result<Stmt, Error> {
                 init,
                 idx: 0,
                 stack_slot: RefCell::new(None),
+                arg_ir_inst: RefCell::new(None),
             });
             decls.push(d.clone());
             state.scopes.last_mut().unwrap().insert(name, d.clone());
@@ -534,6 +535,7 @@ fn parse_function(
                 init: None,
                 idx: f.decls.len(),
                 stack_slot: RefCell::new(None),
+                arg_ir_inst: RefCell::new(None),
             });
 
             state.scopes[1].insert(name, d.clone());
@@ -555,6 +557,7 @@ fn parse_function(
         init: None,
         idx: 0,
         stack_slot: RefCell::new(None),
+        arg_ir_inst: RefCell::new(None),
     });
     state.scopes[0].insert(name, fdecl);
 

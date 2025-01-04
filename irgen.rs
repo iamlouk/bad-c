@@ -214,6 +214,11 @@ impl Function {
         assert!(bbs.is_empty());
         assert!(self.body.is_some(), "todo");
         let bb = Block::create_and_append(&mut bbs);
+        for (idx, decl) in self.decls.iter().filter(|d| d.is_argument).enumerate() {
+            let arg = Inst::new(decl.ty.clone(), OpC::Arg { idx }, Some(decl.sloc.clone()));
+            *decl.arg_ir_inst.borrow_mut() = Some(arg.clone());
+            bb.append(arg);
+        }
         for decl in self.decls.iter() {
             let i = Inst::new(
                 Type::new_ptr(&decl.ty),
@@ -221,7 +226,18 @@ impl Function {
                 Some(decl.sloc.clone()),
             );
             *decl.stack_slot.borrow_mut() = Some(i.clone());
-            bb.append(i);
+            bb.append(i.clone());
+            if decl.is_argument {
+                let arg = decl.arg_ir_inst.borrow().clone().unwrap();
+                let s = Inst::new(
+                    Type::Void,
+                    OpC::Store { is_volatile: false },
+                    Some(decl.sloc.clone()),
+                );
+                s.add_operand(i);
+                s.add_operand(arg);
+                bb.append(s);
+            }
         }
 
         // TODO: Insert a return in case of void functions?

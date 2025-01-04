@@ -255,6 +255,7 @@ pub struct Decl {
     pub init: Option<Box<Expr>>,
     pub idx: usize,
     pub stack_slot: std::cell::RefCell<Option<Rc<ir::Inst>>>,
+    pub arg_ir_inst: std::cell::RefCell<Option<Rc<ir::Inst>>>,
 }
 
 #[allow(dead_code)]
