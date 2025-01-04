@@ -1,6 +1,5 @@
 function fourtytwo_v1(unused: s32) -> u32 {
-.bb0:
-	; preds=[ ], doms=[ .bb0 ]
+.bb0:	; preds=[ ]
 	%1:u32 = const 42
 	ret %1:u32
 	; succs=[ ]
@@ -8,20 +7,17 @@ function fourtytwo_v1(unused: s32) -> u32 {
 }
 
 function fourtytwo_v2() -> u32 {
-.bb0:
-	; preds=[ ], doms=[ .bb0 ]
+.bb0:	; preds=[ ]
 	%3:bool = const 1
 	br %3:bool
 	; succs=[ .bb1 .bb2 ]
 
-.bb1:
-	; preds=[ .bb0 ], doms=[ .bb0 .bb1 ], idom=.bb0
+.bb1:	; preds=[ .bb0 ], idom=.bb0
 	%5:s32 = const 42
 	ret %5:s32
 	; succs=[ ]
 
-.bb2:
-	; preds=[ .bb0 ], doms=[ .bb0 .bb2 ], idom=.bb0
+.bb2:	; preds=[ .bb0 ], idom=.bb0
 	%7:u32 = const 100
 	ret %7:u32
 	; succs=[ ]

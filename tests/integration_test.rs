@@ -1,6 +1,7 @@
+use riscv32::RISCV32;
 use shittyc::*;
 
-fn ir_test(input_file: &str, expected_file: &str, passes: &[&str]) {
+fn ir_test(target: &dyn Target, input_file: &str, expected_file: &str, passes: &[&str]) {
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let input_file = root.join(input_file);
     let expected_file = root.join(expected_file);
@@ -13,7 +14,7 @@ fn ir_test(input_file: &str, expected_file: &str, passes: &[&str]) {
     let passes: Vec<_> = passes.iter().map(|s| s.to_string()).collect();
     for f in cu.functions_iter() {
         f.gen_ir();
-        f.opt(&passes).expect("opt. error");
+        f.opt(&passes, target).expect("opt. error");
     }
 
     let mut irdump = String::new();
@@ -29,15 +30,18 @@ fn ir_test(input_file: &str, expected_file: &str, passes: &[&str]) {
 
 #[test]
 fn fourtytwo() {
-    ir_test("tests/fourtytwo.c", "tests/fourtytwo.ir", &["dce"]);
+    let target = RISCV32::new();
+    ir_test(&target, "tests/fourtytwo.c", "tests/fourtytwo.ir", &["dce"]);
 }
 
 #[test]
 fn add() {
-    ir_test("tests/add.c", "tests/add.ir", &[]);
+    let target = RISCV32::new();
+    ir_test(&target, "tests/add.c", "tests/add.ir", &[]);
 }
 
 #[test]
 fn mem2reg() {
-    ir_test("tests/mem2reg.c", "tests/mem2reg.ir", &["mem2reg", "dce"]);
+    let target = RISCV32::new();
+    ir_test(&target, "tests/mem2reg.c", "tests/mem2reg.ir", &["mem2reg", "dce"]);
 }

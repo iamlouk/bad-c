@@ -1,3 +1,4 @@
+#if 1
 int sign(int n) {
   int sign = 0;
   if (n < 0)
@@ -31,5 +32,14 @@ int sum() {
     sum += i;
     i += 1;
   }
+  return sum;
+}
+#endif
+
+int sum2d(int n, int m) {
+  int sum = 0;
+  for (int i = 0; i < n; i += 1)
+    for (int j = 0; j < m; j += 1)
+      sum += i * j;
   return sum;
 }

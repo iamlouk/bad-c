@@ -86,23 +86,18 @@ fn main() {
         return
     }
 
+    let target = crate::riscv32::RISCV32::new();
     for f in cu.functions_iter() {
         f.gen_ir();
-        if let Err(e) = f.opt(&args.passes) {
+        if let Err(e) = f.opt(&args.passes, &target) {
             eprintln!("opt. error: {:?}", e);
             std::process::exit(1);
         }
-    }
-
-    if args.emitir {
-        for f in cu.functions_iter() {
+        if args.emitir {
+            s.clear();
             f.write_ir(&mut s).expect("internal dump error");
+            output_file.write_all(s.as_bytes()).expect("I/O error");
+            output_file.flush().expect("I/O error");
         }
-        output_file.write_all(s.as_bytes()).expect("I/O error");
-        output_file.flush().expect("I/O error");
-        return
     }
-
-    eprintln!("no action selected, no default action yet!");
-    std::process::exit(1);
 }

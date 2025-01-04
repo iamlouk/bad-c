@@ -1,52 +1,43 @@
 function sign(n: s32) -> s32 {
-.bb0:
-	; preds=[ ], doms=[ .bb0 ]
-	%6:*s32 = alloca s32 (name="n", is_arg=true)
+.bb0:	; preds=[ ]
+	%6:s32 = farg#0
 	%7:s32 = const 0
-	%8:s32 = load from %6:*s32
-	%9:s32 = const 0
-	%10:bool = %8:s32 < %9:s32
-	br %10:bool
+	%8:s32 = const 0
+	%9:bool = %6:s32 < %8:s32
+	br %9:bool
 	; succs=[ .bb1 .bb2 ]
 
-.bb1:
-	; preds=[ .bb0 ], doms=[ .bb0 .bb1 ], idom=.bb0
-	%12:s32 = const 1
-	%13:s32 = const 0
-	%14:s32 = %13:s32 - %12:s32
+.bb1:	; preds=[ .bb0 ], idom=.bb0
+	%11:s32 = const 1
+	%12:s32 = const 0
+	%13:s32 = %12:s32 - %11:s32
 	br
 	; succs=[ .bb5 ]
 
-.bb2:
-	; preds=[ .bb0 ], doms=[ .bb0 .bb2 ], idom=.bb0
-	%16:s32 = load from %6:*s32
-	%17:s32 = const 0
-	%18:bool = %16:s32 > %17:s32
-	br %18:bool
+.bb2:	; preds=[ .bb0 ], idom=.bb0
+	%15:s32 = const 0
+	%16:bool = %6:s32 > %15:s32
+	br %16:bool
 	; succs=[ .bb3 .bb4 ]
 
-.bb3:
-	; preds=[ .bb2 ], doms=[ .bb0 .bb2 .bb3 ], idom=.bb2
-	%20:s32 = const 1
+.bb3:	; preds=[ .bb2 ], idom=.bb2
+	%18:s32 = const 1
 	br
 	; succs=[ .bb4 ]
 
-.bb4:
-	; preds=[ .bb3 .bb2 ], doms=[ .bb0 .bb2 .bb4 ], idom=.bb2
-	%22:s32 = phi %20:s32, %7:s32
+.bb4:	; preds=[ .bb3 .bb2 ], idom=.bb2
+	%20:s32 = phi('sign') %18:s32, %7:s32
 	; succs=[ .bb5 ]
 
-.bb5:
-	; preds=[ .bb1 .bb4 ], doms=[ .bb0 .bb5 ], idom=.bb0
-	%23:s32 = phi %14:s32, %22:s32
-	ret %23:s32
+.bb5:	; preds=[ .bb1 .bb4 ], idom=.bb0
+	%21:s32 = phi('sign') %13:s32, %20:s32
+	ret %21:s32
 	; succs=[ ]
 
 }
 
 function bar() -> s32 {
-.bb0:
-	; preds=[ ], doms=[ .bb0 ]
+.bb0:	; preds=[ ]
 	%3:s32 = const 1
 	%4:s32 = const 2
 	%5:s32 = undef
@@ -54,23 +45,20 @@ function bar() -> s32 {
 	br %6:bool
 	; succs=[ .bb1 .bb2 ]
 
-.bb1:
-	; preds=[ .bb0 ], doms=[ .bb0 .bb1 ], idom=.bb0
+.bb1:	; preds=[ .bb0 ], idom=.bb0
 	%8:s32 = const 42
 	br
 	; succs=[ .bb2 ]
 
-.bb2:
-	; preds=[ .bb1 .bb0 ], doms=[ .bb0 .bb2 ], idom=.bb0
-	%10:s32 = phi %8:s32, %5:s32
+.bb2:	; preds=[ .bb1 .bb0 ], idom=.bb0
+	%10:s32 = phi('a') %8:s32, %5:s32
 	ret %10:s32
 	; succs=[ ]
 
 }
 
 function foo() -> s32 {
-.bb0:
-	; preds=[ ], doms=[ .bb0 ]
+.bb0:	; preds=[ ]
 	%1:s32 = const 1
 	%2:s32 = const 2
 	%3:s32 = %1:s32 + %2:s32
@@ -84,33 +72,77 @@ function foo() -> s32 {
 }
 
 function sum() -> s32 {
-.bb0:
-	; preds=[ ], doms=[ .bb0 ]
+.bb0:	; preds=[ ]
 	%4:s32 = const 1
 	%5:s32 = const 0
 	br
 	; succs=[ .bb1 ]
 
-.bb1:
-	; preds=[ .bb0 .bb2 ], doms=[ .bb0 .bb1 ], idom=.bb0
-	%7:s32 = phi %5:s32, %12:s32
-	%8:s32 = phi %4:s32, %14:s32
+.bb1:	; preds=[ .bb0 .bb2 ], idom=.bb0
+	%7:s32 = phi('sum') %5:s32, %12:s32
+	%8:s32 = phi('i') %4:s32, %14:s32
 	%9:s32 = const 100
 	%10:bool = %8:s32 < %9:s32
 	br %10:bool
 	; succs=[ .bb2 .bb3 ]
 
-.bb2:
-	; preds=[ .bb1 ], doms=[ .bb0 .bb1 .bb2 ], idom=.bb1
+.bb2:	; preds=[ .bb1 ], idom=.bb1
 	%12:s32 = %7:s32 + %8:s32
 	%13:s32 = const 1
 	%14:s32 = %8:s32 + %13:s32
 	br
 	; succs=[ .bb1 ]
 
-.bb3:
-	; preds=[ .bb1 ], doms=[ .bb0 .bb1 .bb3 ], idom=.bb1
+.bb3:	; preds=[ .bb1 ], idom=.bb1
 	ret %7:s32
+	; succs=[ ]
+
+}
+
+function sum2d(n: s32, m: s32) -> s32 {
+.bb0:	; preds=[ ]
+	%7:s32 = farg#0
+	%8:s32 = farg#1
+	%9:s32 = const 0
+	%10:s32 = const 0
+	br
+	; succs=[ .bb1 ]
+
+.bb1:	; preds=[ .bb0 .bb5 ], idom=.bb0
+	%12:s32 = phi('i') %10:s32, %28:s32
+	%13:s32 = phi('sum') %9:s32, %19:s32
+	%14:bool = %12:s32 < %7:s32
+	br %14:bool
+	; succs=[ .bb2 .bb6 ]
+
+.bb2:	; preds=[ .bb1 ], idom=.bb1
+	%16:s32 = const 0
+	br
+	; succs=[ .bb3 ]
+
+.bb3:	; preds=[ .bb2 .bb4 ], idom=.bb2
+	%18:s32 = phi('j') %16:s32, %25:s32
+	%19:s32 = phi('sum') %13:s32, %23:s32
+	%20:bool = %18:s32 < %8:s32
+	br %20:bool
+	; succs=[ .bb4 .bb5 ]
+
+.bb4:	; preds=[ .bb3 ], idom=.bb3
+	%22:s32 = %12:s32 * %18:s32
+	%23:s32 = %19:s32 + %22:s32
+	%24:s32 = const 1
+	%25:s32 = %18:s32 + %24:s32
+	br
+	; succs=[ .bb3 ]
+
+.bb5:	; preds=[ .bb3 ], idom=.bb3
+	%27:s32 = const 1
+	%28:s32 = %12:s32 + %27:s32
+	br
+	; succs=[ .bb1 ]
+
+.bb6:	; preds=[ .bb1 ], idom=.bb1
+	ret %13:s32
 	; succs=[ ]
 
 }
