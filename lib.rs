@@ -15,6 +15,8 @@ pub mod irgen;
 pub mod lex;
 pub mod mem2reg;
 pub mod parse;
+pub mod regalloc;
+pub mod riscv32;
 
 #[derive(Clone, PartialEq, PartialOrd, Debug)]
 pub struct SLoc {
@@ -48,4 +50,12 @@ pub enum Error {
     Type(SLoc, ast::Type, &'static str),
     NotAType,
     UnknownSymbol(SLoc, Rc<str>),
+}
+
+pub trait Target {
+    fn name(&self) -> &'static str;
+    fn argument_regs(&self) -> &[ir::PReg];
+    fn return_reg(&self) -> ir::PReg;
+    fn temporary_regs(&self) -> &[ir::PReg];
+    fn callee_saved_regs(&self) -> &[ir::PReg];
 }

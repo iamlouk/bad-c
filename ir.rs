@@ -1,22 +1,32 @@
 use crate::{
     ast::{BinOp, Decl, Expr, Function, Type},
-    SLoc,
+    SLoc, Target,
 };
 use bit_set::BitSet;
-use std::fmt::Write;
 use std::rc::{Rc, Weak};
 use std::{
     cell::{Cell, RefCell},
     collections::VecDeque,
 };
+use std::{collections::HashMap, fmt::Write};
 
 static IDGEN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+pub type PReg = (u32, &'static str);
+
+#[derive(Debug, Clone, Copy)]
+pub enum MemLoc {
+    None,
+    Reg(PReg),
+    Stack(usize),
+}
 
 pub enum OpC {
     NOp,
     Alloca { decl: Rc<Decl> },
     Global { decl: Rc<Decl> },
-    Phi,
+    Arg { idx: usize },
+    Phi { name: Option<Rc<str>> },
     BinOp { signed: bool, op: BinOp },
     Cmp { signed: bool, op: BinOp },
     Cast,
@@ -33,13 +43,29 @@ pub struct Inst {
     pub idx: Cell<usize>,
     visited: Cell<bool>,
     block: RefCell<Weak<Block>>,
-    name: Option<Rc<str>>,
     pub users: RefCell<Vec<(usize, Rc<Inst>)>>,
     pub ops: RefCell<Vec<Rc<Inst>>>,
     pub ty: Type,
-    reg: Cell<u64>,
-    sloc: Option<SLoc>,
+    pub memloc: Cell<MemLoc>,
+    pub sloc: Option<SLoc>,
     pub opc: OpC,
+}
+
+pub struct Block {
+    pub idx: Cell<usize>,
+    pub visited: Cell<bool>,
+    pub idom: Cell<Option<usize>>,
+    pub doms: RefCell<BitSet>,
+    pub preds: RefCell<Vec<Rc<Block>>>,
+    pub succs: RefCell<Vec<Rc<Block>>>,
+    pub instrs: RefCell<Vec<Rc<Inst>>>,
+}
+
+pub struct Loop {
+    pub header: Option<Rc<Block>>,
+    pub bbs: BitSet,
+    pub latches: BitSet,
+    pub subloops: RefCell<Vec<Rc<Loop>>>,
 }
 
 impl std::cmp::PartialEq for Inst {
@@ -58,6 +84,11 @@ impl std::hash::Hash for Inst {
 
 impl std::fmt::Display for Inst {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.memloc.get() {
+            MemLoc::Reg((_, name)) => write!(f, "{}:", name)?,
+            MemLoc::Stack(off) => write!(f, "stack[{}]:", off)?,
+            MemLoc::None => (),
+        }
         if self.ty != Type::Void {
             write!(f, "%{}:{} = ", self.idx.get(), self.ty)?;
         }
@@ -65,15 +96,13 @@ impl std::fmt::Display for Inst {
         match &self.opc {
             OpC::NOp => write!(f, "nop")?,
             OpC::Undef => write!(f, "undef")?,
-            OpC::Alloca { decl } => write!(
-                f,
-                "alloca {} (name={:?}, is_arg={})",
-                decl.ty,
-                decl.name.as_ref(),
-                decl.is_argument
-            )?,
+            OpC::Alloca { decl } => {
+                write!(f, "alloca {} (name={:?})", decl.ty, decl.name.as_ref(),)?
+            }
+            OpC::Arg { idx } => write!(f, "farg#{}", idx)?,
             OpC::Global { decl } => write!(f, "global {}", decl.ty)?,
-            OpC::Phi => write!(f, "phi")?,
+            OpC::Phi { name: None } => write!(f, "phi")?,
+            OpC::Phi { name: Some(name) } => write!(f, "phi('{}')", name.as_ref())?,
             OpC::BinOp { signed: _, op } => {
                 assert!(ops.len() == 2 && !Expr::is_cmp(*op));
                 write!(
@@ -128,10 +157,9 @@ impl Inst {
             users: RefCell::new(Vec::new()),
             ops: RefCell::new(Vec::new()),
             ty,
-            reg: Cell::new(u64::MAX),
+            memloc: Cell::new(MemLoc::None),
             sloc,
             opc,
-            name: None,
         })
     }
 
@@ -167,7 +195,8 @@ impl Inst {
             OpC::NOp
             | OpC::Undef
             | OpC::Cast
-            | OpC::Phi
+            | OpC::Phi { .. }
+            | OpC::Arg { .. }
             | OpC::Cmp { .. }
             | OpC::BinOp { .. }
             | OpC::Alloca { .. }
@@ -214,6 +243,9 @@ impl Inst {
         instrs.remove(idx);
     }
 
+    pub fn is_phi(&self) -> bool {
+        matches!(self.opc, OpC::Phi { .. })
+    }
     pub fn is_load(&self) -> bool {
         matches!(self.opc, OpC::Load { .. })
     }
@@ -222,6 +254,12 @@ impl Inst {
     }
     pub fn is_alloca(&self) -> bool {
         matches!(self.opc, OpC::Alloca { .. })
+    }
+    pub fn get_decl(&self) -> Rc<Decl> {
+        match &self.opc {
+            OpC::Alloca { decl } => decl.clone(),
+            _ => panic!("not a decl."),
+        }
     }
 
     pub fn get_block(&self) -> Rc<Block> {
@@ -251,27 +289,12 @@ impl Inst {
     }
 }
 
-pub struct Block {
-    pub idx: Cell<usize>,
-    pub idom: Cell<Option<usize>>,
-    pub visited: Cell<bool>,
-    pub doms: RefCell<BitSet>,
-    pub preds: RefCell<Vec<Rc<Block>>>,
-    pub succs: RefCell<Vec<Rc<Block>>>,
-    pub instrs: RefCell<Vec<Rc<Inst>>>,
-}
-
 impl std::fmt::Display for Block {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, ".bb{}:\n\t; preds=[", self.idx.get())?;
+        write!(f, ".bb{}:\t; preds=[", self.idx.get())?;
         let preds = self.preds.borrow();
         for pred in preds.iter() {
             write!(f, " .bb{}", pred.idx.get())?;
-        }
-        f.write_str(" ], doms=[")?;
-        let doms = self.doms.borrow();
-        for idx in doms.iter() {
-            write!(f, " .bb{}", idx)?;
         }
         if let Some(idom) = self.idom.get() {
             writeln!(f, " ], idom=.bb{}", idom)?;
@@ -364,6 +387,20 @@ impl Block {
     pub fn dominates(a: &Block, b: &Block) -> bool {
         let bdoms = b.doms.borrow();
         bdoms.contains(a.idx.get())
+    }
+
+    pub fn get_terminator(&self) -> Rc<Inst> {
+        let instrs = self.instrs.borrow();
+        let term = instrs.last().unwrap();
+        assert!(matches!(term.opc, OpC::Br | OpC::Ret));
+        term.clone()
+    }
+
+    pub fn num_preds(&self) -> usize {
+        self.preds.borrow().len()
+    }
+    pub fn num_succs(&self) -> usize {
+        self.succs.borrow().len()
     }
 
     pub fn reorder_into_rpo(blocks: &mut Vec<Rc<Block>>) {
@@ -468,7 +505,7 @@ impl Block {
                 for (useidx, user) in inst.users.borrow().iter() {
                     let userop = &user.ops.borrow()[*useidx];
                     assert!(std::ptr::eq(&**inst as *const _, &**userop as *const _));
-                    assert!(matches!(inst.opc, OpC::Phi) || Inst::dominates(inst, userop));
+                    assert!(inst.is_phi() || Inst::dominates(inst, userop));
                 }
 
                 let block = inst.block.borrow().upgrade().unwrap();
@@ -476,12 +513,16 @@ impl Block {
 
                 let ops = inst.ops.borrow();
                 match inst.opc {
-                    OpC::Phi => {
+                    OpC::Arg { .. } => assert!(b.idx.get() == 0),
+                    OpC::Phi { .. } => {
                         assert!(ops.len() == preds.len());
                         for (op, pred) in ops.iter().zip(preds.iter()) {
                             assert!(Block::dominates(&op.block.borrow().upgrade().unwrap(), pred));
                         }
                         continue;
+                    }
+                    OpC::Store { .. } => {
+                        assert!(inst.ty == Type::Void && ops.len() == 2);
                     }
                     OpC::Br => {
                         assert!(i == len - 1, "missing terminator");
@@ -506,6 +547,98 @@ impl Block {
     }
 }
 
+impl Loop {
+    pub fn write(&self, w: &mut dyn std::fmt::Write, ident: &mut String) -> std::fmt::Result {
+        let subloops = self.subloops.borrow();
+        if let Some(header) = &self.header {
+            writeln!(w, "{}- header: .bb{}", ident, header.idx.get())?;
+            writeln!(w, "{}  latches: {:?}", ident, self.latches)?;
+            writeln!(w, "{}  bbs: {:?}", ident, self.bbs)?;
+            writeln!(w, "{}  subloops: #{}", ident, subloops.len())?;
+        } else {
+            writeln!(w, "{}- outer-most loops: #{}", ident, subloops.len())?;
+        }
+        ident.push('\t');
+        for l in subloops.iter() {
+            l.write(w, ident)?;
+        }
+        ident.pop();
+        Ok(())
+    }
+
+    fn add_bbs(&mut self, latch: &Rc<Block>) {
+        let header = self.header.as_ref().unwrap();
+        eprintln!("loops: new backage: .bb{} -> .bb{}", latch.idx.get(), header.idx.get());
+        let mut worklist: Vec<Rc<Block>> = Vec::new();
+        worklist.push(latch.clone());
+        while let Some(b) = worklist.pop() {
+            let new = self.bbs.insert(b.idx.get());
+            if !new || b == *header {
+                continue;
+            }
+
+            for pred in b.preds.borrow().iter() {
+                if Block::dominates(header, pred) {
+                    worklist.push(pred.clone());
+                }
+            }
+        }
+    }
+
+    pub fn get_loop_for(self: &Rc<Loop>, idx: usize) -> Rc<Loop> {
+        assert!(self.bbs.contains(idx));
+        for sl in self.subloops.borrow().iter() {
+            if sl.bbs.contains(idx) {
+                return sl.get_loop_for(idx)
+            }
+        }
+        self.clone()
+    }
+
+    pub fn find(bbs: &[Rc<Block>]) -> Rc<Loop> {
+        let mut root = Rc::new(Loop {
+            header: None,
+            bbs: BitSet::new(),
+            latches: BitSet::new(),
+            subloops: RefCell::new(Vec::new()),
+        });
+
+        let rootref = Rc::get_mut(&mut root).unwrap();
+        let mut headers: HashMap<Rc<Block>, Rc<Loop>> = HashMap::new();
+        for b in bbs.iter() {
+            rootref.bbs.insert(b.idx.get());
+            for succ in b.succs.borrow().iter() {
+                if Block::dominates(succ, b) {
+                    if let Some(l) = headers.get_mut(succ) {
+                        let l = Rc::get_mut(l).unwrap();
+                        l.latches.insert(b.idx.get());
+                        l.add_bbs(b);
+                    } else {
+                        let mut l = Loop {
+                            header: Some(succ.clone()),
+                            bbs: BitSet::new(),
+                            latches: BitSet::new(),
+                            subloops: RefCell::new(Vec::new()),
+                        };
+                        l.latches.insert(b.idx.get());
+                        l.add_bbs(b);
+                        headers.insert(succ.clone(), Rc::new(l));
+                    }
+                }
+            }
+        }
+
+        for b in bbs.iter() {
+            if let Some(l) = headers.get(b) {
+                let parent = root.get_loop_for(b.idx.get());
+                parent.subloops.borrow_mut().push(l.clone());
+            }
+        }
+
+        root
+    }
+}
+
 impl Function {
     pub fn write_ir(&self, w: &mut dyn std::fmt::Write) -> std::fmt::Result {
         write!(w, "function {}(", self.name.as_ref())?;
@@ -520,25 +653,58 @@ impl Function {
         w.write_str("}\n\n")
     }
 
-    pub fn opt(&self, passes: &[String]) -> Result<bool, String> {
+    pub fn opt(&self, passes: &[String], target: &dyn Target) -> Result<bool, String> {
+        eprintln!("=== {} ===", self.name.as_ref());
         let mut bbs = self.ir.borrow_mut();
         Block::reorder_into_rpo(&mut bbs);
         Block::recalc_doms_and_verify(&bbs);
+        drop(bbs);
         let mut changed = false;
         for pass in passes {
             use crate::dce;
             use crate::mem2reg;
+            use crate::regalloc;
             match pass.as_str() {
-                "dce" => changed |= dce::run(&bbs) > 0,
+                "dce" => {
+                    eprintln!("--- DCE ---");
+                    let bbs = self.ir.borrow();
+                    changed |= dce::run(&bbs) > 0
+                }
                 "mem2reg" => {
+                    eprintln!("--- mem2reg ---");
                     // mem2reg depends on the DT.
+                    let mut bbs = self.ir.borrow_mut();
                     Block::reorder_into_rpo(&mut bbs);
                     Block::recalc_doms_and_verify(&bbs);
                     changed |= mem2reg::run(&bbs)
                 }
+                "regalloc" => {
+                    eprintln!("--- regalloc ---");
+                    // regalloc depends on RPO BB order.
+                    let mut bbs = self.ir.borrow_mut();
+                    Block::reorder_into_rpo(&mut bbs);
+                    Block::recalc_doms_and_verify(&bbs);
+                    regalloc::run(self, &bbs, target);
+                }
+                "dump" => {
+                    eprintln!("--- IR dump ---");
+                    let mut s = String::new();
+                    self.write_ir(&mut s).unwrap();
+                    use std::io::Write;
+                    std::io::stderr().write_all(s.as_bytes()).unwrap();
+                }
+                "dumploops" => {
+                    eprintln!("--- Loops ---");
+                    let l = Loop::find(&self.ir.borrow());
+                    let mut s = String::new();
+                    l.write(&mut s, &mut String::new()).unwrap();
+                    use std::io::Write;
+                    std::io::stderr().write_all(s.as_bytes()).unwrap();
+                }
                 _ => return Err(format!("unknown pass: {:?}", *pass)),
             }
         }
+        let mut bbs = self.ir.borrow_mut();
         Block::reorder_into_rpo(&mut bbs);
         Block::recalc_doms_and_verify(&bbs);
         Ok(changed)
