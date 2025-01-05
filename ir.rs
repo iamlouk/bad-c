@@ -15,7 +15,7 @@ static IDGEN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::n
 pub type PReg = (u32, &'static str);
 
 #[derive(Debug, Clone, Copy)]
-pub enum MemLoc {
+pub enum PLoc {
     None,
     Reg(PReg),
     Stack(usize),
@@ -46,7 +46,7 @@ pub struct Inst {
     pub users: RefCell<Vec<(usize, Rc<Inst>)>>,
     pub ops: RefCell<Vec<Rc<Inst>>>,
     pub ty: Type,
-    pub memloc: Cell<MemLoc>,
+    pub ploc: Cell<PLoc>,
     pub sloc: Option<SLoc>,
     pub opc: OpC,
 }
@@ -84,10 +84,10 @@ impl std::hash::Hash for Inst {
 
 impl std::fmt::Display for Inst {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.memloc.get() {
-            MemLoc::Reg((_, name)) => write!(f, "{}:", name)?,
-            MemLoc::Stack(off) => write!(f, "stack[{}]:", off)?,
-            MemLoc::None => (),
+        match self.ploc.get() {
+            PLoc::Reg((_, name)) => write!(f, "{}:\t", name)?,
+            PLoc::Stack(off) => write!(f, "stack[{}]:\t", off)?,
+            PLoc::None => (),
         }
         if self.ty != Type::Void {
             write!(f, "%{}:{} = ", self.idx.get(), self.ty)?;
@@ -157,7 +157,7 @@ impl Inst {
             users: RefCell::new(Vec::new()),
             ops: RefCell::new(Vec::new()),
             ty,
-            memloc: Cell::new(MemLoc::None),
+            ploc: Cell::new(PLoc::None),
             sloc,
             opc,
         })
@@ -245,6 +245,9 @@ impl Inst {
 
     pub fn is_phi(&self) -> bool {
         matches!(self.opc, OpC::Phi { .. })
+    }
+    pub fn is_arg(&self) -> bool {
+        matches!(self.opc, OpC::Arg { .. })
     }
     pub fn is_load(&self) -> bool {
         matches!(self.opc, OpC::Load { .. })
@@ -654,7 +657,7 @@ impl Function {
     }
 
     pub fn opt(&self, passes: &[String], target: &dyn Target) -> Result<bool, String> {
-        eprintln!("=== {} ===", self.name.as_ref());
+        eprintln!("=== {} ({}) ===", self.name.as_ref(), target.name());
         let mut bbs = self.ir.borrow_mut();
         Block::reorder_into_rpo(&mut bbs);
         Block::recalc_doms_and_verify(&bbs);

@@ -1,4 +1,4 @@
-#if 0
+#if 1
 
 int fib_v1(unsigned n) {
   int a = 1, b = 1;
@@ -12,7 +12,16 @@ int fib_v1(unsigned n) {
 
 #endif
 
-#if 0
+#if 1
+
+int foo(int a, int b, int c, int d, int e, int f) {
+  int res = a + b + c + d + e + f;
+  return res;
+}
+
+#endif
+
+#if 1
 
 int sign(int n) {
   int sign = 0;
