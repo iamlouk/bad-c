@@ -16,7 +16,7 @@ pub mod lex;
 pub mod mem2reg;
 pub mod parse;
 pub mod regalloc;
-pub mod riscv32;
+pub mod rv64;
 
 #[derive(Clone, PartialEq, PartialOrd, Debug)]
 pub struct SLoc {

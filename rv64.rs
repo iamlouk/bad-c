@@ -2,17 +2,17 @@ use crate::ir::*;
 use crate::Target;
 
 #[derive(Default)]
-pub struct RISCV32 {}
+pub struct RV64 {}
 
-impl RISCV32 {
+impl RV64 {
     pub fn new() -> Self {
         Self {}
     }
 }
 
-impl Target for RISCV32 {
+impl Target for RV64 {
     fn name(&self) -> &'static str {
-        "riscv32m"
+        "rv64"
     }
 
     fn return_reg(&self) -> PReg {

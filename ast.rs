@@ -395,6 +395,7 @@ pub enum Expr {
     PtrAdd { sloc: SLoc, pty: Type, ptr: Box<Expr>, offset: Box<Expr> },
     Call { sloc: SLoc, typ: Type, func: Box<Expr>, args: Vec<Expr> },
     Deref { sloc: SLoc, typ: Type, ptr: Box<Expr> },
+    AddressOf { sloc: SLoc, typ: Type, op: Box<Expr> },
     FieldAccess { sloc: SLoc, typ: Type, obj: Box<Expr>, field: Rc<str>, offset: usize },
 }
 
@@ -410,6 +411,7 @@ impl Expr {
             Expr::PtrAdd { pty, .. } => pty,
             Expr::Call { typ, .. } => typ,
             Expr::Deref { typ, .. } => typ,
+            Expr::AddressOf { typ, .. } => typ,
             Expr::FieldAccess { typ, .. } => typ,
         })
         .clone()
@@ -529,6 +531,11 @@ impl Expr {
             Expr::Deref { ptr, .. } => {
                 f.write_str("*(")?;
                 ptr.write(f)?;
+                f.write_char(')')
+            }
+            Expr::AddressOf { op, .. } => {
+                f.write_str("&(")?;
+                op.write(f)?;
                 f.write_char(')')
             }
             Expr::FieldAccess { obj, field, .. } => {

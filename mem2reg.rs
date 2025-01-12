@@ -3,41 +3,35 @@ use std::{collections::HashMap, rc::Rc};
 
 use crate::ir::*;
 
-// Replace phi nodes where all inc. values are the same or phi nodes that include
-// themselves.
-pub fn simplify_phis(bbs: &[Rc<Block>]) -> bool {
-    let mut instrs: Vec<Rc<Inst>> = Vec::new();
-    let mut changes = false;
-    for bb in bbs.iter() {
-        bb.instrs.borrow().clone_into(&mut instrs);
-        for i in instrs.iter() {
-            if !i.is_phi() {
-                break;
-            }
-
-            let mut ok = true;
-            let mut newval: Option<Rc<Inst>> = None;
-            for op in i.ops.borrow().iter().filter(|op| **op != *i) {
-                if newval.is_none() {
-                    newval = Some(op.clone());
-                    continue;
-                } else if newval.clone().unwrap() == *op {
-                    continue;
-                }
-                ok = false;
-                break;
-            }
-
-            if ok {
-                if let Some(newval) = newval {
-                    i.replace_all_uses_with(newval);
-                    i.drop_operands_and_unlink();
-                    changes = true;
-                }
-            }
+pub fn simplify_phi(phi: &Rc<Inst>) -> bool {
+    assert!(phi.is_phi());
+    let mut newval = None;
+    for op in phi.ops.borrow().iter() {
+        if op == phi || (newval.is_some() && newval.as_ref().unwrap() == op) {
+            continue
         }
+        if newval.is_none() {
+            newval = Some(op.clone());
+            continue
+        }
+        return false
     }
-    changes
+
+    if let Some(newval) = newval {
+        phi.replace_all_uses_with(&newval);
+        phi.drop_operands_and_unlink();
+        return true
+    }
+    false
+}
+
+fn simplify_phis(mut phis: HashMap<(usize, Rc<Inst>), Rc<Inst>>) {
+    let mut changes = true;
+    while changes {
+        let len = phis.len();
+        phis.retain(|_, phi| !simplify_phi(phi));
+        changes = phis.len() != len;
+    }
 }
 
 pub fn run(bbs: &[Rc<Block>]) -> bool {
@@ -83,11 +77,11 @@ pub fn run(bbs: &[Rc<Block>]) -> bool {
 
                 let bb_needing_phi = bbs[frontieridx].clone();
                 let phi = Inst::new(
-                    (*a.ty.ety()).clone(),
+                    &a.ty.ety(),
                     OpC::Phi { name: name.clone() },
-                    a.sloc.clone(),
+                    a.sloc.as_ref(), &[]
                 );
-                bb_needing_phi.insert(0, phi.clone());
+                bb_needing_phi.insert(0, &phi);
                 phis.insert((frontieridx, a.clone()), phi);
             }
         }
@@ -109,8 +103,8 @@ pub fn run(bbs: &[Rc<Block>]) -> bool {
             let outval = match outval {
                 Some(val) => val,
                 None => {
-                    let undef = Inst::new((*a.ty.ety()).clone(), OpC::Undef, a.sloc.clone());
-                    bb.insert_before_terminator(undef.clone());
+                    let undef = Inst::new(&a.ty.ety(), OpC::Undef, None, &[]);
+                    bb.insert_before_terminator(&undef);
                     undef
                 }
             };
@@ -125,7 +119,7 @@ pub fn run(bbs: &[Rc<Block>]) -> bool {
         let preds = bbs[*bbidx].preds.borrow();
         for pred in preds.iter() {
             let val = blockoutvals.get(&(pred.idx.get(), a.clone())).unwrap();
-            phi.add_operand(val.clone());
+            phi.add_operand(val);
         }
     }
 
@@ -153,13 +147,13 @@ pub fn run(bbs: &[Rc<Block>]) -> bool {
                     i.drop_operands_and_unlink();
                 }
                 if i.is_load() && i.get_operand(0) == *a {
-                    i.replace_all_uses_with(if let Some(val) = &val {
+                    i.replace_all_uses_with(&(if let Some(val) = &val {
                         val.clone()
                     } else {
-                        let undef = Inst::new((*a.ty.ety()).clone(), OpC::Undef, a.sloc.clone());
-                        undef.insert_before(i.clone());
+                        let undef = Inst::new(&a.ty.ety(), OpC::Undef, None, &[]);
+                        undef.insert_before(i);
                         undef
-                    });
+                    }));
                     i.drop_operands_and_unlink();
                 }
             }
@@ -167,7 +161,7 @@ pub fn run(bbs: &[Rc<Block>]) -> bool {
     }
 
     // Remove some redundant PHIs.
-    while simplify_phis(bbs) {}
+    simplify_phis(phis);
 
     true
 }

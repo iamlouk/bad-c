@@ -388,6 +388,11 @@ fn parse_final_expr(state: &mut Unit, lex: &mut Lexer) -> Result<Box<Expr>, Erro
             };
             Box::new(Expr::Deref { sloc, typ, ptr })
         }
+        Tok::Ampersand => {
+            let op = parse_final_expr(state, lex)?;
+            let typ = Type::new_ptr(&op.get_typ());
+            Box::new(Expr::AddressOf { sloc, typ, op })
+        }
         Tok::LParen => match try_parse_type(state, lex) {
             Ok(typ) => {
                 lex.expect_tok(Tok::RParen, "cast expression")?;

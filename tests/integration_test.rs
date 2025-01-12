@@ -1,4 +1,4 @@
-use riscv32::RISCV32;
+use rv64::RV64;
 use shittyc::*;
 
 fn ir_test(target: &dyn Target, input_file: &str, expected_file: &str, passes: &[&str]) {
@@ -30,18 +30,18 @@ fn ir_test(target: &dyn Target, input_file: &str, expected_file: &str, passes: &
 
 #[test]
 fn fourtytwo() {
-    let target = RISCV32::new();
+    let target = RV64::new();
     ir_test(&target, "tests/fourtytwo.c", "tests/fourtytwo.ir", &["dce"]);
 }
 
 #[test]
 fn add() {
-    let target = RISCV32::new();
+    let target = RV64::new();
     ir_test(&target, "tests/add.c", "tests/add.ir", &[]);
 }
 
 #[test]
 fn mem2reg() {
-    let target = RISCV32::new();
+    let target = RV64::new();
     ir_test(&target, "tests/mem2reg.c", "tests/mem2reg.ir", &["mem2reg", "dce"]);
 }

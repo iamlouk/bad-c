@@ -86,7 +86,7 @@ fn main() {
         return
     }
 
-    let target = crate::riscv32::RISCV32::new();
+    let target = rv64::RV64::new();
     for f in cu.functions_iter() {
         f.gen_ir();
         if let Err(e) = f.opt(&args.passes, &target) {

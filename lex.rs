@@ -5,7 +5,6 @@ use std::rc::Rc;
 
 use crate::{Error, SLoc};
 
-#[allow(dead_code)]
 #[derive(Clone, PartialEq, PartialOrd, Debug)]
 pub enum Tok {
     /* Special: */
@@ -17,7 +16,7 @@ pub enum Tok {
 
     /* Literals: */
     Id(Rc<str>),
-    String(Rc<str>),
+    StrLit(Rc<str>),
     IntLit { signed: bool, bits: u8, val: i64 },
     CharLit(char),
 
@@ -123,12 +122,12 @@ impl Display for Tok {
         use Tok::*;
         f.write_str(match self {
             EndOfFile => return Ok(()),
-            EndOfMacro => return write!(f, "<END-OF-MACRO>"),
-            Backslash => return write!(f, "<BACKSLASH>"),
-            StartOfDirective => return write!(f, "<START-OF-DIRECTIVE>"),
-            SkipMe => return write!(f, "<SKIP-ME>"),
+            EndOfMacro => "<END-OF-MACRO>",
+            Backslash => "<BACKSLASH>",
+            StartOfDirective => "<START-OF-DIRECTIVE>",
+            SkipMe => "<SKIP-ME>",
             Id(id) => return write!(f, "{}", &**id),
-            String(str) => return write!(f, "{:?}", &**str),
+            StrLit(str) => return write!(f, "{:?}", &**str),
             IntLit { signed: true, bits: 32, val } => return write!(f, "{}", val),
             IntLit { signed: true, bits: 64, val } => return write!(f, "{}l", val),
             IntLit { signed: false, bits: 32, val } => return write!(f, "{}u", val),
@@ -238,7 +237,7 @@ impl Display for Tok {
 }
 
 impl Tok {
-    fn equal_to_str(&self, m: &str) -> bool {
+    fn eq_to_str(&self, m: &str) -> bool {
         match self {
             Tok::Id(id) => id.as_ref() == m,
             Tok::If => "if" == m,
@@ -543,7 +542,7 @@ impl File {
                 while let Some(mut c) = self.next_u8() {
                     if c == b'"' {
                         let res = state.get_buf();
-                        return Ok((sloc, Tok::String(res)));
+                        return Ok((sloc, Tok::StrLit(res)));
                     }
 
                     if c == b'\\' {
@@ -878,7 +877,7 @@ impl Lexer {
         assert!(self.peeked.is_none() && self.tokqueue.is_empty());
         assert!(self.state.macros.len() == 1 && !self.expand);
         let (sloc, dir) = self.next()?;
-        if dir.equal_to_str("define") {
+        if dir.eq_to_str("define") {
             let (sloc, name) = self.expect_id("expected macro name")?;
             let mut parameters = vec![];
             if self.peek()?.1 == Tok::LParen {
@@ -924,9 +923,9 @@ impl Lexer {
             return Ok(());
         }
 
-        if dir.equal_to_str("include") {
+        if dir.eq_to_str("include") {
             let s = match self.next()? {
-                (_, Tok::String(s)) => s,
+                (_, Tok::StrLit(s)) => s,
                 (_, Tok::Smaller) => {
                     self.files.last_mut().unwrap().system_include_path(&mut self.state)?
                 }
@@ -958,13 +957,13 @@ impl Lexer {
             return Err(Error::Lex(sloc, format!("included file not found: {:?}", s.as_ref())));
         }
 
-        if dir.equal_to_str("ifdef") {
+        if dir.eq_to_str("ifdef") {
             let (_, id) = self.expect_id("expected a identifier after '#ifdef'")?;
             let defined = self.state.macros[0].contains_key(id.as_ref());
             return self.directive_cond(defined);
         }
 
-        if dir.equal_to_str("if") {
+        if dir.eq_to_str("if") {
             self.expand = true;
             match self.next()?.1 {
                 Tok::IntLit { val: 0, .. } => {
@@ -979,24 +978,24 @@ impl Lexer {
             }
         }
 
-        if dir.equal_to_str("ifndef") {
+        if dir.eq_to_str("ifndef") {
             let (_, id) = self.expect_id("expected a identifier after '#if<n>def'")?;
             let defined = self.state.macros[0].contains_key(id.as_ref());
             return self.directive_cond(!defined);
         }
 
-        if dir.equal_to_str("endif") {
+        if dir.eq_to_str("endif") {
             self.ifdef_stack.pop();
             return Ok(());
         }
 
-        if dir.equal_to_str("else") {
+        if dir.eq_to_str("else") {
             self.ifdef_stack.pop().unwrap();
             self.directive_cond(false)?;
             return Ok(());
         }
 
-        if dir.equal_to_str("undef") {
+        if dir.eq_to_str("undef") {
             assert!(self.state.macros.len() == 1);
             let (_, id) = self.expect_id("expected a identifier after '#undef'")?;
             self.state.macros[0].remove(&id);
@@ -1017,14 +1016,14 @@ impl Lexer {
                     continue;
                 }
                 let (_, dir) = self.next()?;
-                if dir.equal_to_str("ifdef") || dir.equal_to_str("ifndef") || dir.equal_to_str("if")
+                if dir.eq_to_str("ifdef") || dir.eq_to_str("ifndef") || dir.eq_to_str("if")
                 {
                     self.ifdef_stack.push(true);
-                } else if dir.equal_to_str("else") && prev_depth == self.ifdef_stack.len() + 1 {
+                } else if dir.eq_to_str("else") && prev_depth == self.ifdef_stack.len() + 1 {
                     self.ifdef_stack.pop();
                     self.ifdef_stack.push(true);
                     return Ok(());
-                } else if dir.equal_to_str("endif") {
+                } else if dir.eq_to_str("endif") {
                     self.ifdef_stack.pop();
                 }
             }
@@ -1082,7 +1081,7 @@ impl Lexer {
         for (sloc, tok) in m.value.iter().rev() {
             let mut tok = tok.clone();
             for (name, value) in m.parameters.iter().zip(arguments.iter()) {
-                if tok.equal_to_str(name.as_ref()) {
+                if tok.eq_to_str(name.as_ref()) {
                     for (sloc, tok) in value.iter().rev() {
                         self.tokqueue.push_front((sloc.clone(), tok.clone()));
                     }
@@ -1140,7 +1139,7 @@ mod test {
         assert_matches!(toks[2], Tok::RBracket);
         assert_matches!(toks[3], Tok::Plus);
         assert_matches!(toks[4], Tok::LParen);
-        assert_matches!(toks[5], Tok::String(ref s) if s.as_ref() == "bar");
+        assert_matches!(toks[5], Tok::StrLit(ref s) if s.as_ref() == "bar");
         assert_matches!(toks[6], Tok::RParen);
         assert_matches!(toks[7], Tok::MinusMinus);
         assert_matches!(toks[8], Tok::IntLit { signed: true, bits: 32, val: 42 });

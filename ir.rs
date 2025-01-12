@@ -27,8 +27,9 @@ pub enum OpC {
     Global { decl: Rc<Decl> },
     Arg { idx: usize },
     Phi { name: Option<Rc<str>> },
-    BinOp { signed: bool, op: BinOp },
-    Cmp { signed: bool, op: BinOp },
+    BinOp { op: BinOp },
+    PtrAdd { scaled_by: usize },
+    Cmp { op: BinOp },
     Cast,
     Br,
     Call,
@@ -103,7 +104,7 @@ impl std::fmt::Display for Inst {
             OpC::Global { decl } => write!(f, "global {}", decl.ty)?,
             OpC::Phi { name: None } => write!(f, "phi")?,
             OpC::Phi { name: Some(name) } => write!(f, "phi('{}')", name.as_ref())?,
-            OpC::BinOp { signed: _, op } => {
+            OpC::BinOp { op } => {
                 assert!(ops.len() == 2 && !Expr::is_cmp(*op));
                 write!(
                     f,
@@ -116,7 +117,7 @@ impl std::fmt::Display for Inst {
                 )?;
                 return Ok(())
             }
-            OpC::Cmp { signed: _, op } => {
+            OpC::Cmp { op } => {
                 assert!(ops.len() == 2 && Expr::is_cmp(*op));
                 write!(
                     f,
@@ -126,6 +127,19 @@ impl std::fmt::Display for Inst {
                     Expr::binop_to_str(*op),
                     ops[1].idx.get(),
                     &ops[0].ty
+                )?;
+                return Ok(())
+            }
+            OpC::PtrAdd { scaled_by } => {
+                assert!(ops.len() == 2);
+                write!(
+                    f,
+                    "%{}:{} + %{}:{} * {}",
+                    ops[0].idx.get(),
+                    &ops[0].ty,
+                    ops[1].idx.get(),
+                    &ops[0].ty,
+                    scaled_by
                 )?;
                 return Ok(())
             }
@@ -148,19 +162,23 @@ impl std::fmt::Display for Inst {
 }
 
 impl Inst {
-    pub fn new(ty: Type, opc: OpC, sloc: Option<SLoc>) -> Rc<Self> {
+    pub fn new(ty: &Type, opc: OpC, sloc: Option<&SLoc>, ops: &[&Rc<Inst>]) -> Rc<Self> {
         let idx = IDGEN.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
-        Rc::new(Self {
+        let inst = Rc::new(Self {
             idx: Cell::new(idx),
             visited: Cell::new(false),
             block: RefCell::new(Weak::new()),
             users: RefCell::new(Vec::new()),
             ops: RefCell::new(Vec::new()),
-            ty,
+            ty: ty.clone(),
             ploc: Cell::new(PLoc::None),
-            sloc,
+            sloc: sloc.cloned(),
             opc,
-        })
+        });
+        for op in ops {
+            inst.add_operand(op);
+        }
+        inst
     }
 
     // Return true if a dominates b.
@@ -183,7 +201,7 @@ impl Inst {
         panic!("a or b not in their parent?!")
     }
 
-    pub fn add_operand(self: &Rc<Self>, op: Rc<Self>) {
+    pub fn add_operand(self: &Rc<Self>, op: &Rc<Self>) {
         let mut ops = self.ops.borrow_mut();
         let mut users = op.users.borrow_mut();
         users.push((ops.len(), self.clone()));
@@ -198,6 +216,7 @@ impl Inst {
             | OpC::Phi { .. }
             | OpC::Arg { .. }
             | OpC::Cmp { .. }
+            | OpC::PtrAdd { .. }
             | OpC::BinOp { .. }
             | OpC::Alloca { .. }
             | OpC::Load { is_volatile: false }
@@ -274,7 +293,7 @@ impl Inst {
         self.ops.borrow()[idx].clone()
     }
 
-    pub fn replace_all_uses_with(&self, newval: Rc<Inst>) {
+    pub fn replace_all_uses_with(&self, newval: &Rc<Inst>) {
         assert_eq!(self.ty, newval.ty);
         let mut uses = self.users.borrow_mut();
         let mut newuses = newval.users.borrow_mut();
@@ -285,10 +304,10 @@ impl Inst {
         uses.clear();
     }
 
-    pub fn insert_before(self: &Rc<Inst>, inst: Rc<Inst>) {
+    pub fn insert_before(self: &Rc<Inst>, inst: &Rc<Inst>) {
         let block = inst.get_block();
-        let idx = block.instrs.borrow().iter().position(|i| **i == *inst).unwrap();
-        block.insert(idx, self.clone());
+        let idx = block.instrs.borrow().iter().position(|i| **i == **inst).unwrap();
+        block.insert(idx, self);
     }
 }
 
@@ -366,24 +385,24 @@ impl Block {
         preds.remove(predidx);
     }
 
-    pub fn append(self: &Rc<Block>, inst: Rc<Inst>) {
+    pub fn append(self: &Rc<Block>, inst: &Rc<Inst>) {
         assert!(inst.block.borrow().upgrade().is_none());
         *inst.block.borrow_mut() = Rc::downgrade(self);
         self.instrs.borrow_mut().push(inst.clone());
     }
 
-    pub fn insert(self: &Rc<Block>, idx: usize, inst: Rc<Inst>) {
+    pub fn insert(self: &Rc<Block>, idx: usize, inst: &Rc<Inst>) {
         assert!(inst.block.borrow().upgrade().is_none());
         *inst.block.borrow_mut() = Rc::downgrade(self);
         self.instrs.borrow_mut().insert(idx, inst.clone());
     }
 
-    pub fn insert_before_terminator(self: &Rc<Block>, inst: Rc<Inst>) {
+    pub fn insert_before_terminator(self: &Rc<Block>, inst: &Rc<Inst>) {
         assert!(inst.block.borrow().upgrade().is_none());
         *inst.block.borrow_mut() = Rc::downgrade(self);
         let mut instrs = self.instrs.borrow_mut();
         let pos = instrs.len() - 2;
-        instrs.insert(pos, inst);
+        instrs.insert(pos, inst.clone());
     }
 
     // Return true if a dominates b.
