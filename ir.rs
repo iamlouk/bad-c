@@ -234,6 +234,10 @@ impl Inst {
         self.users.borrow().len()
     }
 
+    pub fn num_ops(&self) -> usize {
+        self.ops.borrow().len()
+    }
+
     pub fn does_not_escape(&self) -> bool {
         assert!(matches!(self.opc, OpC::Alloca { .. }));
         for (useidx, useop) in self.users.borrow().iter() {
@@ -686,11 +690,19 @@ impl Function {
             use crate::dce;
             use crate::mem2reg;
             use crate::regalloc;
+            use crate::cse;
             match pass.as_str() {
                 "dce" => {
                     eprintln!("--- DCE ---");
                     let bbs = self.ir.borrow();
                     changed |= dce::run(&bbs) > 0
+                }
+                "cse" => {
+                    eprintln!("--- CSE ---");
+                    let mut bbs = self.ir.borrow_mut();
+                    Block::reorder_into_rpo(&mut bbs);
+                    Block::recalc_doms_and_verify(&bbs);
+                    changed |= cse::run(&bbs) > 0;
                 }
                 "mem2reg" => {
                     eprintln!("--- mem2reg ---");

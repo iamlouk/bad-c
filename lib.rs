@@ -14,6 +14,7 @@ pub mod ir;
 pub mod irgen;
 pub mod lex;
 pub mod mem2reg;
+pub mod cse;
 pub mod parse;
 pub mod regalloc;
 pub mod rv64;
