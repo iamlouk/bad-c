@@ -1016,8 +1016,7 @@ impl Lexer {
                     continue;
                 }
                 let (_, dir) = self.next()?;
-                if dir.eq_to_str("ifdef") || dir.eq_to_str("ifndef") || dir.eq_to_str("if")
-                {
+                if dir.eq_to_str("ifdef") || dir.eq_to_str("ifndef") || dir.eq_to_str("if") {
                     self.ifdef_stack.push(true);
                 } else if dir.eq_to_str("else") && prev_depth == self.ifdef_stack.len() + 1 {
                     self.ifdef_stack.pop();

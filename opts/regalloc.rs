@@ -21,7 +21,7 @@ pub fn run(_f: &Function, bbs: &[Rc<Block>], target: &dyn Target) {
             uses[0].insert(arg.idx.get());
             arg.ploc.set(match argregs.get(*idx) {
                 Some(preg) => PLoc::Reg(*preg),
-                None => unimplemented!("arguments passed on the stack")
+                None => unimplemented!("arguments passed on the stack"),
             });
             alivevals.push(arg.clone());
         }

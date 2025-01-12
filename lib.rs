@@ -9,14 +9,11 @@ use std::path::Path;
 use std::rc::Rc;
 
 pub mod ast;
-pub mod dce;
 pub mod ir;
 pub mod irgen;
 pub mod lex;
-pub mod mem2reg;
-pub mod cse;
+pub mod opts;
 pub mod parse;
-pub mod regalloc;
 pub mod rv64;
 
 #[derive(Clone, PartialEq, PartialOrd, Debug)]

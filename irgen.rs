@@ -15,7 +15,7 @@ fn gen_ir_stmt(cbb: Rc<Block>, stmt: &Stmt, bbs: &mut Vec<Rc<Block>>) -> Rc<Bloc
                         &Type::Void,
                         OpC::Store { is_volatile: false },
                         Some(&decl.sloc),
-                        &[alloca.as_ref().unwrap(), &expr]
+                        &[alloca.as_ref().unwrap(), &expr],
                     );
                     cbb.append(&store);
                 }
@@ -45,9 +45,7 @@ fn gen_ir_stmt(cbb: Rc<Block>, stmt: &Stmt, bbs: &mut Vec<Rc<Block>>) -> Rc<Bloc
         }
         Stmt::If { cond, then, otherwise, sloc } => {
             let cond = gen_ir_expr(cbb.clone(), cond.as_ref());
-            let cbr = Inst::new(&Type::Void, OpC::Br, Some(sloc), &[
-                &cond
-            ]);
+            let cbr = Inst::new(&Type::Void, OpC::Br, Some(sloc), &[&cond]);
             cbb.append(&cbr);
 
             let thenentrybb = Block::create_and_append(bbs);
@@ -74,9 +72,7 @@ fn gen_ir_stmt(cbb: Rc<Block>, stmt: &Stmt, bbs: &mut Vec<Rc<Block>>) -> Rc<Bloc
 
             let condbb = Block::create_and_append(bbs);
             let cond = gen_ir_expr(condbb.clone(), cond.as_ref());
-            let cbr = Inst::new(&Type::Void, OpC::Br, Some(sloc), &[
-                &cond
-            ]);
+            let cbr = Inst::new(&Type::Void, OpC::Br, Some(sloc), &[&cond]);
             condbb.append(&cbr);
 
             let loopentrybb = Block::create_and_append(bbs);
@@ -136,13 +132,9 @@ fn gen_ir_expr(cbb: Rc<Block>, expr: &Expr) -> Rc<Inst> {
             assert_eq!(lhs.ty, rhs.ty);
             let i = Inst::new(
                 typ,
-                if Expr::is_cmp(*op) {
-                    OpC::Cmp { op: *op }
-                } else {
-                    OpC::BinOp { op: *op }
-                },
+                if Expr::is_cmp(*op) { OpC::Cmp { op: *op } } else { OpC::BinOp { op: *op } },
                 Some(sloc),
-                &[&lhs, &rhs]
+                &[&lhs, &rhs],
             );
             cbb.append(&i);
             i
@@ -152,11 +144,7 @@ fn gen_ir_expr(cbb: Rc<Block>, expr: &Expr) -> Rc<Inst> {
             let val = gen_ir_expr(cbb.clone(), val.as_ref());
             let zero = Inst::new(typ, OpC::Const { val: 0 }, Some(sloc), &[]);
             cbb.append(&zero);
-            let sub = Inst::new(
-                typ,
-                OpC::BinOp { op: BinOp::Sub },
-                Some(sloc), &[&zero, &val]
-            );
+            let sub = Inst::new(typ, OpC::BinOp { op: BinOp::Sub }, Some(sloc), &[&zero, &val]);
             cbb.append(&sub);
             sub
         }
@@ -164,22 +152,29 @@ fn gen_ir_expr(cbb: Rc<Block>, expr: &Expr) -> Rc<Inst> {
             let dst = match lhs.as_ref() {
                 Expr::Id { decl, .. } => decl.stack_slot.borrow().as_ref().unwrap().clone(),
                 Expr::Deref { ptr, .. } => gen_ir_expr(cbb.clone(), ptr),
-                _ => unimplemented!()
+                _ => unimplemented!(),
             };
 
             let mut val = gen_ir_expr(cbb.clone(), rhs.as_ref());
             if let Some(binop) = op {
-                let load = Inst::new(&val.ty, OpC::Load { is_volatile: false }, Some(sloc), &[&dst]);
+                let load =
+                    Inst::new(&val.ty, OpC::Load { is_volatile: false }, Some(sloc), &[&dst]);
                 cbb.append(&load);
-                let binop = Inst::new(&val.ty, OpC::BinOp { op: *binop }, Some(sloc), &[&load, &val]);
+                let binop =
+                    Inst::new(&val.ty, OpC::BinOp { op: *binop }, Some(sloc), &[&load, &val]);
                 cbb.append(&binop);
                 val = binop;
             }
 
-            let store = Inst::new(&Type::Void, OpC::Store { is_volatile: false }, Some(sloc), &[&dst, &val]);
+            let store = Inst::new(
+                &Type::Void,
+                OpC::Store { is_volatile: false },
+                Some(sloc),
+                &[&dst, &val],
+            );
             cbb.append(&store);
             val
-        },
+        }
         Expr::AddressOf { sloc, typ, op } => match op.as_ref() {
             Expr::Deref { ptr, .. } => gen_ir_expr(cbb, ptr),
             Expr::Id { decl, .. } => {
@@ -191,7 +186,7 @@ fn gen_ir_expr(cbb: Rc<Block>, expr: &Expr) -> Rc<Inst> {
                 _ = typ;
                 unimplemented!()
             }
-        }
+        },
         Expr::Deref { sloc, typ, ptr } => match ptr.as_ref() {
             Expr::AddressOf { op, .. } => gen_ir_expr(cbb, op),
             _ => {
@@ -200,13 +195,23 @@ fn gen_ir_expr(cbb: Rc<Block>, expr: &Expr) -> Rc<Inst> {
                 cbb.append(&load);
                 load
             }
-        }
+        },
         Expr::PtrAdd { sloc, pty, ptr, offset } => {
             let ptr = gen_ir_expr(cbb.clone(), ptr);
             let offset = gen_ir_expr(cbb.clone(), offset);
-            let scale = Inst::new(&offset.ty, OpC::Const { val: pty.ety().sizeof() as i64 }, Some(sloc), &[]);
+            let scale = Inst::new(
+                &offset.ty,
+                OpC::Const { val: pty.ety().sizeof() as i64 },
+                Some(sloc),
+                &[],
+            );
             cbb.append(&scale);
-            let scaled = Inst::new(&offset.ty, OpC::BinOp { op: BinOp::Mul }, Some(sloc), &[&offset, &scale]);
+            let scaled = Inst::new(
+                &offset.ty,
+                OpC::BinOp { op: BinOp::Mul },
+                Some(sloc),
+                &[&offset, &scale],
+            );
             cbb.append(&scaled);
             let cast = Inst::new(pty, OpC::Cast, Some(sloc), &[&scaled]);
             cbb.append(&cast);
@@ -233,7 +238,8 @@ impl Function {
             let i = Inst::new(
                 &Type::new_ptr(&decl.ty),
                 OpC::Alloca { decl: decl.clone() },
-                Some(&decl.sloc), &[]
+                Some(&decl.sloc),
+                &[],
             );
             *decl.stack_slot.borrow_mut() = Some(i.clone());
             bb.append(&i);
@@ -243,7 +249,7 @@ impl Function {
                     &Type::Void,
                     OpC::Store { is_volatile: false },
                     Some(&decl.sloc),
-                    &[&i, &arg]
+                    &[&i, &arg],
                 );
                 bb.append(&s);
             }

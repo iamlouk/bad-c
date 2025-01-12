@@ -76,11 +76,8 @@ pub fn run(bbs: &[Rc<Block>]) -> bool {
                 }
 
                 let bb_needing_phi = bbs[frontieridx].clone();
-                let phi = Inst::new(
-                    &a.ty.ety(),
-                    OpC::Phi { name: name.clone() },
-                    a.sloc.as_ref(), &[]
-                );
+                let phi =
+                    Inst::new(&a.ty.ety(), OpC::Phi { name: name.clone() }, a.sloc.as_ref(), &[]);
                 bb_needing_phi.insert(0, &phi);
                 phis.insert((frontieridx, a.clone()), phi);
             }
@@ -147,13 +144,15 @@ pub fn run(bbs: &[Rc<Block>]) -> bool {
                     i.drop_operands_and_unlink();
                 }
                 if i.is_load() && i.get_operand(0) == *a {
-                    i.replace_all_uses_with(&(if let Some(val) = &val {
-                        val.clone()
-                    } else {
-                        let undef = Inst::new(&a.ty.ety(), OpC::Undef, None, &[]);
-                        undef.insert_before(i);
-                        undef
-                    }));
+                    i.replace_all_uses_with(
+                        &(if let Some(val) = &val {
+                            val.clone()
+                        } else {
+                            let undef = Inst::new(&a.ty.ety(), OpC::Undef, None, &[]);
+                            undef.insert_before(i);
+                            undef
+                        }),
+                    );
                     i.drop_operands_and_unlink();
                 }
             }
