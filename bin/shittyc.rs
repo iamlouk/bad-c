@@ -21,6 +21,9 @@ struct Args {
     #[arg(short = 'E', action)]
     preprocess: bool,
 
+    #[arg(short = 'O', action)]
+    optimize: bool,
+
     #[arg(short, long, action)]
     unparse: bool,
 
@@ -89,10 +92,19 @@ fn main() {
     let target = rv64::RV64::new();
     for f in cu.functions_iter() {
         f.gen_ir();
-        if let Err(e) = f.opt(&args.passes, &target) {
-            eprintln!("opt. error: {:?}", e);
-            std::process::exit(1);
+        if args.optimize {
+            if let Err(e) = f.opt(crate::opts::DEFAULT_OPTS, &target) {
+                eprintln!("opt. error: {:?}", e);
+                std::process::exit(1);
+            }
+        } else {
+            let passes: Vec<&str> = args.passes.iter().map(|s| s.as_str()).collect();
+            if let Err(e) = f.opt(&passes, &target) {
+                eprintln!("opt. error: {:?}", e);
+                std::process::exit(1);
+            }
         }
+
         if args.emitir {
             s.clear();
             f.write_ir(&mut s).expect("internal dump error");

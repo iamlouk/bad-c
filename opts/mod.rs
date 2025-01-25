@@ -10,8 +10,10 @@ mod licm;
 mod mem2reg;
 mod regalloc;
 
+pub static DEFAULT_OPTS: &[&str] = &["mem2reg", "dce", "licm", "cse", "dce"];
+
 impl Function {
-    pub fn opt(&self, passes: &[String], target: &dyn Target) -> Result<bool, String> {
+    pub fn opt(&self, passes: &[&str], target: &dyn Target) -> Result<bool, String> {
         eprintln!("=== {} ({}) ===", self.name.as_ref(), target.name());
         let mut bbs = self.ir.borrow_mut();
         Block::reorder_into_rpo(&mut bbs);
@@ -19,7 +21,7 @@ impl Function {
         drop(bbs);
         let mut changed = false;
         for pass in passes {
-            match pass.as_str() {
+            match *pass {
                 "dce" => {
                     eprintln!("--- DCE ---");
                     let bbs = self.ir.borrow();

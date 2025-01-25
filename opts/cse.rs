@@ -13,6 +13,7 @@ impl Inst {
             (OpC::Cmp { op: op0 }, OpC::Cmp { op: op1 }) => op0 == op1,
             (OpC::PtrAdd { scaled_by: s0 }, OpC::PtrAdd { scaled_by: s1 }) => s0 == s1,
             (OpC::Const { val: val0 }, OpC::Const { val: val1 }) => val0 == val1,
+            (OpC::Cast, OpC::Cast) => true,
             (_, _) => false,
         }) {
             return false

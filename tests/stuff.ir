@@ -1,0 +1,39 @@
+function idaxpy(n: u32, x: *s32, y: *s32, a: s32) -> void  {
+.bb0:	; preds=[ ]
+	%4:u32 = farg#0
+	%5:*s32 = farg#1
+	%6:*s32 = farg#2
+	%7:s32 = farg#3
+	%8:u32 = const 0
+	%9:u32 = const 4
+	%10:s32 = const 42
+	%11:s32 = %7:s32 + %10:s32
+	%12:u32 = const 1
+	br
+	; succs=[ .bb1 ]
+
+.bb1:	; preds=[ .bb0 .bb2 ], idom=.bb0
+	%14:u32 = phi('i') %8:u32, %26:u32
+	%15:bool = %14:u32 < %4:u32
+	br %15:bool
+	; succs=[ .bb2 .bb3 ]
+
+.bb2:	; preds=[ .bb1 ], idom=.bb1
+	%17:u32 = %14:u32 * %9:u32
+	%18:*s32 = cast to *s32: %17:u32
+	%19:*s32 = %6:*s32 + %18:*s32
+	%20:s32 = load from %19:*s32
+	%21:*s32 = %5:*s32 + %18:*s32
+	%22:s32 = load from %21:*s32
+	%23:s32 = %22:s32 * %11:s32
+	%24:s32 = %20:s32 + %23:s32
+	store to %19:*s32, %24:s32
+	%26:u32 = %14:u32 + %12:u32
+	br
+	; succs=[ .bb1 ]
+
+.bb3:	; preds=[ .bb1 ], idom=.bb1
+	; succs=[ ]
+
+}
+
