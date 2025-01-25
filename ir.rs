@@ -251,19 +251,24 @@ impl Inst {
         true
     }
 
-    pub fn drop_operands_and_unlink(&self) {
+    pub fn unlink(self: &Rc<Inst>) {
+        let b = self.get_block();
+        let mut instrs = b.instrs.borrow_mut();
+        let idx = instrs.iter().position(|i| i == self).unwrap();
+        instrs.remove(idx);
+        *self.block.borrow_mut() = Weak::new();
+    }
+
+    pub fn drop_operands_and_unlink(self: &Rc<Inst>) {
         assert!(self.num_uses() == 0);
         let mut ops = self.ops.borrow_mut();
         for (idx, op) in ops.iter().enumerate() {
             let mut users = op.users.borrow_mut();
-            let idx = users.iter().position(|(uidx, uop)| *uidx == idx && **uop == *self).unwrap();
+            let idx = users.iter().position(|(uidx, uop)| *uidx == idx && **uop == **self).unwrap();
             users.remove(idx);
         }
         ops.clear();
-        let block = self.block.borrow().upgrade().unwrap();
-        let mut instrs = block.instrs.borrow_mut();
-        let idx = instrs.iter().position(|op| **op == *self).unwrap();
-        instrs.remove(idx);
+        self.unlink();
     }
 
     pub fn is_phi(&self) -> bool {

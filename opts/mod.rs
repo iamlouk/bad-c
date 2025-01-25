@@ -6,6 +6,7 @@ use crate::{
 
 mod cse;
 mod dce;
+mod licm;
 mod mem2reg;
 mod regalloc;
 
@@ -38,6 +39,13 @@ impl Function {
                     Block::reorder_into_rpo(&mut bbs);
                     Block::recalc_doms_and_verify(&bbs);
                     changed |= mem2reg::run(&bbs)
+                }
+                "licm" => {
+                    eprintln!("--- LICM ---");
+                    let mut bbs = self.ir.borrow_mut();
+                    Block::reorder_into_rpo(&mut bbs);
+                    Block::recalc_doms_and_verify(&bbs);
+                    changed |= licm::run(&bbs) > 0
                 }
                 "regalloc" => {
                     eprintln!("--- regalloc ---");
