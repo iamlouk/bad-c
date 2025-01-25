@@ -11,10 +11,9 @@ fn ir_test(target: &dyn Target, input_file: &str, expected_file: &str, passes: &
     let mut cu = ast::Unit::new();
     cu.parse(&mut l).expect("parsing error");
 
-    let passes: Vec<_> = passes.iter().map(|s| s.to_string()).collect();
     for f in cu.functions_iter() {
         f.gen_ir();
-        f.opt(&passes, target).expect("opt. error");
+        f.opt(passes, target).expect("opt. error");
     }
 
     let mut irdump = String::new();
