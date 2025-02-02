@@ -18,10 +18,10 @@ struct Args {
     #[arg(short = 'I', long)]
     include_paths: Vec<PathBuf>,
 
-    #[arg(short = 'E', action)]
+    #[arg(short = 'E', long, action)]
     preprocess: bool,
 
-    #[arg(short = 'O', action)]
+    #[arg(short = 'O', long, action)]
     optimize: bool,
 
     #[arg(short, long, action)]
@@ -111,5 +111,28 @@ fn main() {
             output_file.write_all(s.as_bytes()).expect("I/O error");
             output_file.flush().expect("I/O error");
         }
+    }
+    if args.emitir {
+        return
+    }
+
+    // Generate IR:
+    let mut target = rv64::RV64::new();
+    for f in cu.functions_iter() {
+        s.clear();
+        let bbs = f.ir.borrow();
+        eprintln!("--- RegAlloc ---");
+        let mut rar = opts::regalloc::run(&f, &bbs, &target);
+        eprintln!("--- CodeGen ---");
+        target.write_function_prologue(&f, &mut rar, &mut s).unwrap();
+        for bb in bbs.iter() {
+            target.write_label(&f, bb, &mut s).unwrap();
+            for i in bb.instrs.borrow().iter() {
+                target.write_instr(&f, i, &mut s).unwrap();
+            }
+        }
+        target.write_function_epilogue(&f, &rar, &mut s).unwrap();
+        output_file.write_all(s.as_bytes()).expect("I/O error");
+        output_file.flush().expect("I/O error");
     }
 }

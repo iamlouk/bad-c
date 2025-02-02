@@ -3,6 +3,7 @@ use crate::{
     SLoc,
 };
 use bit_set::BitSet;
+use num_bigint::BigInt;
 use std::rc::{Rc, Weak};
 use std::{
     cell::{Cell, RefCell},
@@ -14,11 +15,21 @@ static IDGEN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::n
 
 pub type PReg = (u32, &'static str);
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum PLoc {
     None,
     Reg(PReg),
-    Stack(usize),
+    Stack(usize, usize),
+}
+
+impl std::fmt::Display for PLoc {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::None => f.write_str("<no location assigned>"),
+            Self::Reg(reg) => f.write_str(reg.1),
+            Self::Stack(start, size) => write!(f, "stack[{}:{}]", start, start+size)
+        }
+    }
 }
 
 pub enum OpC {
@@ -36,7 +47,7 @@ pub enum OpC {
     Ret,
     Load { is_volatile: bool },
     Store { is_volatile: bool },
-    Const { val: i64 },
+    Const { val: BigInt },
     Undef,
 }
 
@@ -87,7 +98,7 @@ impl std::fmt::Display for Inst {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.ploc.get() {
             PLoc::Reg((_, name)) => write!(f, "{}:\t", name)?,
-            PLoc::Stack(off) => write!(f, "stack[{}]:\t", off)?,
+            PLoc::Stack(off, size) => write!(f, "stack[{}:{}]:\t", off, off+size)?,
             PLoc::None => (),
         }
         if self.ty != Type::Void {
@@ -285,6 +296,9 @@ impl Inst {
     }
     pub fn is_alloca(&self) -> bool {
         matches!(self.opc, OpC::Alloca { .. })
+    }
+    pub fn is_call(&self) -> bool {
+        matches!(self.opc, OpC::Call)
     }
     pub fn get_decl(&self) -> Rc<Decl> {
         match &self.opc {

@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use bit_set::BitSet;
@@ -5,9 +7,10 @@ use bit_set::BitSet;
 use crate::ast::Function;
 use crate::ast::Type;
 use crate::ir::*;
+use crate::RegAllocRes;
 use crate::Target;
 
-pub fn run(_f: &Function, bbs: &[Rc<Block>], target: &dyn Target) {
+pub fn run(_f: &Function, bbs: &[Rc<Block>], target: &dyn Target) -> RegAllocRes {
     let argregs = target.argument_regs();
 
     let mut uses: Vec<BitSet> = bbs.iter().map(|_| BitSet::new()).collect();
@@ -88,19 +91,30 @@ pub fn run(_f: &Function, bbs: &[Rc<Block>], target: &dyn Target) {
 
     // Super basic linear scan:
     let mut stack_offset: usize = 0;
+    let mut used_callee_save_regs = BTreeSet::new();
+    let caller_saved_regs_alive_over_call = HashMap::new();
     let mut free_regs: Vec<_> = target.callee_saved_regs().iter().rev().cloned().collect();
     for (bidx, bb) in bbs.iter().enumerate() {
         let liveout = &liveouts[bidx];
         for i in bb.instrs.borrow().iter() {
+            if i.is_call() {
+                // TODO: Use caller save regs. and add them here?
+                eprintln!("{} -> registers alive: {:?}", i, free_regs);
+            }
+
             if i.ty != Type::Void && !i.is_arg() {
                 i.ploc.set(match free_regs.pop() {
-                    Some(r) => PLoc::Reg(r),
+                    Some(r) => {
+                        used_callee_save_regs.insert(r);
+                        PLoc::Reg(r)
+                    },
                     None => {
                         let off = stack_offset;
                         stack_offset += i.ty.sizeof();
-                        PLoc::Stack(off)
+                        PLoc::Stack(off, i.ty.sizeof())
                     }
                 });
+                eprintln!("%{}:{} -> {}", i.idx.get(), &i.ty, i.ploc.get());
                 alivevals.push(i.clone());
             }
 
@@ -119,5 +133,12 @@ pub fn run(_f: &Function, bbs: &[Rc<Block>], target: &dyn Target) {
                 true
             })
         }
+    }
+
+    RegAllocRes {
+        used_callee_save_regs,
+        used_caller_save_regs: BTreeSet::new(),
+        used_stack_size_without_allocs: stack_offset,
+        caller_saved_regs_alive_over_call
     }
 }

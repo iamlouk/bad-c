@@ -8,7 +8,7 @@ mod cse;
 mod dce;
 mod licm;
 mod mem2reg;
-mod regalloc;
+pub mod regalloc;
 
 pub static DEFAULT_OPTS: &[&str] = &["mem2reg", "dce", "licm", "cse", "dce"];
 

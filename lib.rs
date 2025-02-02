@@ -5,6 +5,7 @@
 // ir::Inst and ir::Block hash by address, but contain (Ref)Cells.
 #![allow(clippy::mutable_key_type)]
 
+use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
 use std::rc::Rc;
 
@@ -50,10 +51,22 @@ pub enum Error {
     UnknownSymbol(SLoc, Rc<str>),
 }
 
+pub struct RegAllocRes {
+    used_callee_save_regs: BTreeSet<ir::PReg>,
+    used_caller_save_regs: BTreeSet<ir::PReg>,
+    used_stack_size_without_allocs: usize,
+    caller_saved_regs_alive_over_call: HashMap<Rc<ir::Inst>, Vec<ir::PReg>>
+}
+
 pub trait Target {
     fn name(&self) -> &'static str;
     fn argument_regs(&self) -> &[ir::PReg];
     fn return_reg(&self) -> ir::PReg;
     fn temporary_regs(&self) -> &[ir::PReg];
     fn callee_saved_regs(&self) -> &[ir::PReg];
+
+    fn write_function_prologue(&mut self, f: &ast::Function, regalloc: &mut RegAllocRes, w: &mut dyn std::fmt::Write) -> std::fmt::Result;
+    fn write_function_epilogue(&mut self, f: &ast::Function, regalloc: &RegAllocRes, w: &mut dyn std::fmt::Write) -> std::fmt::Result;
+    fn write_label(&mut self, f: &ast::Function, bb: &Rc<ir::Block>, w: &mut dyn std::fmt::Write) -> std::fmt::Result;
+    fn write_instr(&mut self, f: &ast::Function, i: &ir::Inst, w: &mut dyn std::fmt::Write) -> std::fmt::Result;
 }

@@ -13,6 +13,7 @@ bit-set = { version = "*", features = [] }
 # Once https://github.com/rust-lang/cargo/issues/1982 is done,
 # move this to the binary!
 clap = { version = "4.5.23", features = ["derive"] }
+num-bigint = "0.4.6"
 
 [lib]
 path = "./lib.rs"

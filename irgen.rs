@@ -116,7 +116,7 @@ fn gen_ir_stmt(cbb: Rc<Block>, stmt: &Stmt, bbs: &mut Vec<Rc<Block>>) -> Rc<Bloc
 fn gen_ir_expr(cbb: Rc<Block>, expr: &Expr) -> Rc<Inst> {
     match expr {
         Expr::IntLit { sloc, typ, num } => {
-            let i = Inst::new(typ, OpC::Const { val: *num }, Some(sloc), &[]);
+            let i = Inst::new(typ, OpC::Const { val: (*num).into() }, Some(sloc), &[]);
             cbb.append(&i);
             i
         }
@@ -142,7 +142,7 @@ fn gen_ir_expr(cbb: Rc<Block>, expr: &Expr) -> Rc<Inst> {
         Expr::UnaryOp { sloc, typ, op: UnaryOp::Neg, val } => {
             assert!(typ.is_numerical());
             let val = gen_ir_expr(cbb.clone(), val.as_ref());
-            let zero = Inst::new(typ, OpC::Const { val: 0 }, Some(sloc), &[]);
+            let zero = Inst::new(typ, OpC::Const { val: 0.into() }, Some(sloc), &[]);
             cbb.append(&zero);
             let sub = Inst::new(typ, OpC::BinOp { op: BinOp::Sub }, Some(sloc), &[&zero, &val]);
             cbb.append(&sub);
@@ -201,7 +201,7 @@ fn gen_ir_expr(cbb: Rc<Block>, expr: &Expr) -> Rc<Inst> {
             let offset = gen_ir_expr(cbb.clone(), offset);
             let scale = Inst::new(
                 &offset.ty,
-                OpC::Const { val: pty.ety().sizeof() as i64 },
+                OpC::Const { val: pty.ety().sizeof().into() },
                 Some(sloc),
                 &[],
             );
